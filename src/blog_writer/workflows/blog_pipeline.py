@@ -38,7 +38,7 @@ from blog_writer.config import AppConfig
 from blog_writer.models import ModelMap, load_model_map
 from blog_writer.tools.bing_search import bing_search_stub
 from blog_writer.tools.code_sandbox import run_in_sandbox
-from blog_writer.tools.learn_mcp import load_learn_scopes, search_learn_stub
+from blog_writer.tools.learn_mcp import load_learn_scopes, search_learn, search_learn_stub
 from blog_writer.workflows.state import (
     BlogState,
     Citation,
@@ -177,29 +177,38 @@ async def _pick_angle(
 async def _internal_knowledge(
     state: BlogState, *, config: AppConfig, models: ModelMap
 ) -> BlogState:
-    scope = load_learn_scopes(config)
-    if config.stub:
-        # Deterministic stub path — skip the agent and use canned in-scope hits.
-        hits = scope.filter_hits(await search_learn_stub(state.angle or state.seed))
-        state.internal_hits = [
-            Citation(
-                key=f"L{i + 1}",
-                kind="learn",
-                title=h.title,
-                url=h.url,
-                summary=h.excerpt,
-            )
-            for i, h in enumerate(hits)
-        ]
-        return state
+    """Stage 2 — query MS Learn via MCP, scope-filter, build citations.
 
-    agent = build_internal_knowledge_agent(config, models)
-    response = await _run_agent(
-        agent,
-        f"Angle: {state.angle}\n\nFind the most relevant Microsoft Learn best practices.",
-    )
-    text = _text_of(response)
-    state.internal_hits = _parse_citations(text, kind="learn", prefix="L")
+    The search is always done by a direct MCP call (no LLM in the loop) so
+    citations are grounded in a real result set. In real mode, after the
+    deterministic seed, the Internal Knowledge agent is asked to rank and
+    summarise — it can also fetch full pages via ``microsoft_docs_fetch``.
+    """
+    scope = load_learn_scopes(config)
+    query = state.angle or state.seed
+
+    if config.stub:
+        raw_hits = await search_learn_stub(query)
+    else:
+        raw_hits = await search_learn(query, url=config.ms_learn_mcp_url)
+        # Network / MCP error or empty result — fall back to canned hits so
+        # the rest of the pipeline still has something to work with.
+        if not raw_hits:
+            raw_hits = await search_learn_stub(query)
+
+    hits = scope.filter_hits(raw_hits)
+    # Keep the top N to bound LLM prompts downstream.
+    hits = hits[: config.max_learn_hits]
+    state.internal_hits = [
+        Citation(
+            key=f"L{i + 1}",
+            kind="learn",
+            title=h.title,
+            url=h.url,
+            summary=h.excerpt,
+        )
+        for i, h in enumerate(hits)
+    ]
     return state
 
 
@@ -296,6 +305,12 @@ async def _build_pocs(state: BlogState, *, config: AppConfig, models: ModelMap) 
 async def _build_one_poc(
     spec: PoCSpec, *, config: AppConfig, models: ModelMap
 ) -> PoCResult:
+    """Generate a PoC, run it in the sandbox, retry on failure up to N attempts.
+
+    Each retry passes the previous attempt's stderr back to the agent so it
+    can fix the bug. Stops as soon as the sandbox returns exit code 0 or we
+    run out of attempts.
+    """
     if config.stub:
         code = (
             '"""Stub PoC demonstrating the concept."""\n'
@@ -314,14 +329,24 @@ async def _build_one_poc(
             attempts=1,
             narrative=f"Demonstrates: {spec.description}",
         )
+
     agent = build_poc_builder_agent(config, models)
-    response = await _run_agent(
-        agent,
-        f"PoC spec:\n{spec}\n\nGenerate the code, then describe what it shows.",
-    )
-    text = _text_of(response)
-    code = _extract_first_code_block(text) or f"# {spec.description}\nprint('todo')\n"
-    sandbox_result = await run_in_sandbox(code, language=spec.language, config=config)
+    max_attempts = max(1, config.max_poc_attempts)
+    last_text = ""
+    code = f"# {spec.description}\nprint('todo')\n"
+    sandbox_result = None
+    for attempt in range(1, max_attempts + 1):
+        prompt = _poc_prompt(spec, attempt=attempt, previous=sandbox_result, previous_code=code)
+        response = await _run_agent(agent, prompt)
+        last_text = _text_of(response)
+        extracted = _extract_first_code_block(last_text)
+        if extracted:
+            code = extracted
+        sandbox_result = await run_in_sandbox(code, language=spec.language, config=config)
+        if sandbox_result.exit_code == 0:
+            break
+
+    assert sandbox_result is not None  # loop runs at least once
     return PoCResult(
         spec=spec,
         code=code,
@@ -329,8 +354,33 @@ async def _build_one_poc(
         exit_code=sandbox_result.exit_code,
         stdout=sandbox_result.stdout,
         stderr=sandbox_result.stderr,
-        attempts=1,
-        narrative=text.split("```", maxsplit=1)[0].strip() or spec.description,
+        attempts=attempt,
+        narrative=last_text.split("```", maxsplit=1)[0].strip() or spec.description,
+    )
+
+
+def _poc_prompt(
+    spec: PoCSpec,
+    *,
+    attempt: int,
+    previous: Any | None,
+    previous_code: str,
+) -> str:
+    base = (
+        f"PoC spec:\n{spec}\n\n"
+        "Generate the code (as a single fenced code block), then describe what it shows."
+    )
+    if attempt == 1 or previous is None or previous.exit_code == 0:
+        return base
+    # Retry: give the agent the previous attempt and its failure output so it
+    # can fix the bug rather than starting from scratch.
+    return (
+        base
+        + f"\n\nPrevious attempt {attempt - 1} failed (exit code {previous.exit_code}). "
+        "Fix the bug and return a corrected sample.\n\n"
+        f"Previous code:\n```{spec.language}\n{previous_code}\n```\n\n"
+        f"stderr (truncated):\n{(previous.stderr or '')[:2000]}\n\n"
+        f"stdout (truncated):\n{(previous.stdout or '')[:1000]}"
     )
 
 

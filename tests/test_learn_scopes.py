@@ -45,3 +45,36 @@ def test_filter_keeps_in_scope_and_drops_out_of_scope() -> None:
     ]
     kept = scope.filter_hits(hits)
     assert {h.title for h in kept} == {"CAF page", "WAF page"}
+
+
+def test_filter_handles_urls_without_locale_prefix_and_with_fragments() -> None:
+    """The live MS Learn MCP returns URLs without a /en-us prefix and often
+    with section fragments — the filter must match both."""
+    scope = LearnScopeFilter(
+        allow_list=(
+            "/azure/cloud-adoption-framework/",
+            "/azure/architecture/",
+        )
+    )
+    hits = [
+        LearnHit(
+            title="No-locale CAF page",
+            url="https://learn.microsoft.com/azure/cloud-adoption-framework/ready/landing-zone/",
+            excerpt="...",
+        ),
+        LearnHit(
+            title="No-locale Arch Center page with fragment",
+            url="https://learn.microsoft.com/azure/architecture/landing-zones/landing-zone-deploy#application-landing-zone-architectures",
+            excerpt="...",
+        ),
+        LearnHit(
+            title="No-locale out-of-scope page",
+            url="https://learn.microsoft.com/azure/some-other-product/overview",
+            excerpt="...",
+        ),
+    ]
+    kept = scope.filter_hits(hits)
+    assert {h.title for h in kept} == {
+        "No-locale CAF page",
+        "No-locale Arch Center page with fragment",
+    }

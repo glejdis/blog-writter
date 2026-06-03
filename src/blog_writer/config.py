@@ -37,9 +37,25 @@ class AppConfig(BaseSettings):
     # ---- Workflow ------------------------------------------------------------
     max_revisions: int = Field(default=3, ge=0, le=10)
     critic_threshold: int = Field(default=80, ge=0, le=100)
+    max_learn_hits: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        description="Max number of in-scope MS Learn citations to keep per post.",
+    )
+    max_poc_attempts: int = Field(
+        default=3,
+        ge=1,
+        le=5,
+        description="Max attempts the PoC Builder gets to produce a passing sample.",
+    )
 
     # ---- Tools ---------------------------------------------------------------
     sandbox: Sandbox = "local"
+    ms_learn_mcp_url: str = Field(
+        default="https://learn.microsoft.com/api/mcp",
+        description="Override the MS Learn Docs MCP endpoint (rarely needed).",
+    )
 
     # ---- Paths ---------------------------------------------------------------
     drafts_dir: Path = PROJECT_ROOT / "drafts"
