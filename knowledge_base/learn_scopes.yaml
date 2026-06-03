@@ -1,0 +1,32 @@
+# Microsoft Learn allow-list for the Internal Knowledge agent.
+#
+# The MS Learn Docs MCP server (microsoft_docs_search) returns ranked results
+# from across all of learn.microsoft.com. We post-filter those results to keep
+# only hits whose URL path starts with one of the prefixes below — the
+# high-signal "best practices" Learn surface area.
+#
+# Add / remove prefixes here to tune what counts as an "internal best practice".
+
+allow_list:
+  # The Cloud Adoption Framework — strategy, plan, ready, govern, manage.
+  - "/azure/cloud-adoption-framework/"
+
+  # The Azure Well-Architected Framework — pillars (reliability, security,
+  # cost optimization, operational excellence, performance efficiency).
+  - "/azure/well-architected/"
+
+  # The Azure Architecture Center — reference architectures and design guides.
+  - "/azure/architecture/"
+
+  # Azure AI Foundry — first-party agentic platform docs.
+  - "/azure/ai-foundry/"
+
+  # Azure AI Services general docs (OpenAI, Speech, Search, Document
+  # Intelligence). The agent will still prefer the more specific roots above
+  # when their content is relevant.
+  - "/azure/ai-services/"
+
+# When all results from microsoft_docs_search fall outside the allow-list,
+# the Internal Knowledge agent reports "no internal best practices found" so
+# the Writer knows to lean on external Research with caveats.
+fallback_behavior: report_empty

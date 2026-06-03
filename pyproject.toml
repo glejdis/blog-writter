@@ -1,0 +1,60 @@
+[project]
+name = "blog-writer"
+version = "0.1.0"
+description = "Multi-agent system that researches, plans, and writes blog posts on Azure infrastructure and agentic AI topics. Prioritizes Microsoft Learn (CAF / Well-Architected / Architecture Center / AI Foundry) as the internal best-practices source."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "blog-writer" }]
+dependencies = [
+    # Microsoft Agent Framework: install the core (skip the [all] extra so we
+    # don't drag in agent-framework-ag-ui -> uvicorn[standard] -> httptools,
+    # which has no win-arm64 wheel.
+    "agent-framework-core>=1.7.0",
+    "agent-framework-openai>=1.7.0",
+    "agent-framework-foundry>=1.7.0",
+    "agent-framework-azure-ai>=1.0.0rc6",
+    # MCP client for the Microsoft Learn Docs MCP server.
+    "mcp>=1.24.0,<2",
+    # CLI + config + io
+    "typer>=0.16",
+    "rich>=13",
+    "pydantic>=2.11",
+    "pydantic-settings>=2.5",
+    "python-dotenv>=1.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+blog-writer = "blog_writer.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/blog_writer"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+    "ignore::UserWarning",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501"]

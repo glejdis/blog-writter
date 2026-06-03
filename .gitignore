@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Test / coverage
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Editor
+.vscode/
+.idea/
+
+# Env files
+.env
+.env.local
+
+# Generated content (kept under the repo root so users can browse easily)
+drafts/*
+!drafts/.gitkeep
+samples/*
+!samples/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db
