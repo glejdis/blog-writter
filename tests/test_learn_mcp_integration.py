@@ -20,7 +20,6 @@ from blog_writer.tools.learn_mcp import (
     search_learn_code_samples,
 )
 
-
 INTEGRATION_ENABLED = os.getenv("RUN_INTEGRATION_TESTS") == "1"
 skipif_no_network = pytest.mark.skipif(
     not INTEGRATION_ENABLED,

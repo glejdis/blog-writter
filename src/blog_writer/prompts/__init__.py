@@ -6,7 +6,7 @@ easy to edit, version, and review in pull requests independently of code.
 
 from __future__ import annotations
 
-from functools import lru_cache
+from functools import cache, lru_cache
 from pathlib import Path
 
 from blog_writer.models.config import AgentRole
@@ -14,7 +14,7 @@ from blog_writer.models.config import AgentRole
 PROMPTS_DIR = Path(__file__).resolve().parent
 
 
-@lru_cache(maxsize=None)
+@cache
 def load_prompt(role: AgentRole) -> str:
     """Read the system prompt for `role` from `prompts/<role>.md`."""
     path = PROMPTS_DIR / f"{role}.md"

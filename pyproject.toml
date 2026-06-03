@@ -37,6 +37,12 @@ telemetry = [
     # needed when you want to ship traces to Application Insights.
     "azure-monitor-opentelemetry>=1.6",
 ]
+ui = [
+    # Web UI dependencies — FastAPI for the ASGI app, websockets for the
+    # bidirectional chat protocol. uvicorn is already a transitive dep.
+    "fastapi>=0.115",
+    "websockets>=13",
+]
 
 [project.scripts]
 blog-writer = "blog_writer.cli:app"
@@ -47,7 +53,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/blog_writer", "mcp_servers"]
+packages = ["src/blog_writer", "mcp_servers", "ui"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

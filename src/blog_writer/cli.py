@@ -190,5 +190,34 @@ def _print_summary(state: BlogState) -> None:
     console.print(Markdown(state.draft[:1500] + ("\n…\n" if len(state.draft) > 1500 else "")))
 
 
+# ---------------------------------------------------------------------------
+# UI launcher
+# ---------------------------------------------------------------------------
+
+
+@app.command("ui")
+def ui(
+    host: Annotated[str, typer.Option("--host", help="Bind host.")] = "127.0.0.1",
+    port: Annotated[int, typer.Option("--port", help="Bind port.")] = 8000,
+    reload: Annotated[
+        bool, typer.Option("--reload", help="Enable uvicorn auto-reload.")
+    ] = False,
+) -> None:
+    """Launch the chat-style web UI (FastAPI + WebSocket on localhost)."""
+    try:
+        from ui.server import run as run_ui
+    except ImportError as exc:
+        console.print(
+            "[red]UI dependencies are missing.[/red] Install them with:\n"
+            "  uv pip install fastapi websockets"
+        )
+        raise typer.Exit(code=1) from exc
+
+    console.print(
+        f"[green]Starting blog-writer UI[/green] → http://{host}:{port}/  (Ctrl+C to stop)"
+    )
+    run_ui(host=host, port=port, reload=reload)
+
+
 if __name__ == "__main__":
     app()

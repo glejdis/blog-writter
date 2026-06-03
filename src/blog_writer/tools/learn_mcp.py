@@ -42,7 +42,6 @@ import yaml
 
 from blog_writer.config import AppConfig
 
-
 logger = logging.getLogger(__name__)
 
 

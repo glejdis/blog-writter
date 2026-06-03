@@ -135,7 +135,7 @@ async def test_github_search_skipped_without_network(
 
     class _BoomClient:
         def __init__(self, *a: Any, **kw: Any) -> None: ...
-        async def __aenter__(self) -> "_BoomClient":
+        async def __aenter__(self) -> _BoomClient:
             return self
         async def __aexit__(self, *a: Any) -> None: ...
         async def get(self, *a: Any, **kw: Any) -> Any:

@@ -6,7 +6,6 @@ from blog_writer.tools.code_sandbox import SandboxResult
 from blog_writer.workflows.blog_pipeline import _poc_prompt
 from blog_writer.workflows.state import PoCSpec
 
-
 SPEC = PoCSpec(
     id="agent-demo",
     section="Building the agent",

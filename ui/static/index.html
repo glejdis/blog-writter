@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>blog-writer · chat</title>
+    <link rel="stylesheet" href="/static/style.css" />
+    <script
+      defer
+      src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"
+    ></script>
+    <script defer src="/static/app.js"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="dot"></span>
+        <strong>blog-writer</strong>
+        <span class="muted">multi-agent · MS Learn-grounded</span>
+      </div>
+      <div class="status" id="status">
+        <span class="status-dot" id="status-dot"></span>
+        <span id="status-text">connecting…</span>
+      </div>
+    </header>
+
+    <main class="layout">
+      <!-- LEFT: setup + stages -->
+      <section class="pane pane-left">
+        <h2>1 · Brief</h2>
+        <form id="brief-form">
+          <label>
+            Topic <span class="required">*</span>
+            <input
+              id="topic"
+              name="topic"
+              type="text"
+              placeholder="e.g. agentic landing zones on Azure"
+              required
+            />
+          </label>
+          <details>
+            <summary>Optional steering</summary>
+            <label>
+              Suggested table of contents
+              <textarea
+                id="toc"
+                rows="5"
+                placeholder="One section per line — the Planner will use this as a strong starting point."
+              ></textarea>
+            </label>
+            <label>
+              Additional instructions
+              <textarea
+                id="instructions"
+                rows="3"
+                placeholder="e.g. tone, length, audience, sections to avoid…"
+              ></textarea>
+            </label>
+            <div class="row">
+              <label class="check">
+                <input type="checkbox" id="autonomous" /> Autonomous (skip my approvals)
+              </label>
+              <label class="check">
+                <input type="checkbox" id="stub" /> Stub mode (no model calls)
+              </label>
+            </div>
+          </details>
+          <button id="start-btn" type="submit">Start writing</button>
+        </form>
+
+        <h2>2 · Agents</h2>
+        <ol id="stages" class="stages"></ol>
+      </section>
+
+      <!-- RIGHT: chat + draft -->
+      <section class="pane pane-right">
+        <div id="chat" class="chat"></div>
+        <div id="draft-wrap" class="draft-wrap hidden">
+          <div class="draft-head">
+            <h2>Draft <span id="draft-iter" class="muted"></span></h2>
+            <div class="draft-actions">
+              <button id="download-btn" type="button" disabled>Download .md</button>
+              <button id="accept-btn" type="button" disabled>Accept draft</button>
+            </div>
+          </div>
+          <article id="draft" class="draft"></article>
+        </div>
+        <form id="revise-form" class="revise hidden">
+          <input
+            id="revise-input"
+            type="text"
+            placeholder="Ask for a change — e.g. 'make the intro punchier' or 'add a section on RAG'"
+            autocomplete="off"
+          />
+          <button type="submit">Revise</button>
+        </form>
+      </section>
+    </main>
+  </body>
+</html>

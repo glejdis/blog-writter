@@ -22,7 +22,6 @@ from agent_framework import (
 from blog_writer.config import AppConfig
 from blog_writer.models.config import AgentRole, ModelMap
 
-
 # -----------------------------------------------------------------------------
 # Stub client — used in tests / when no creds are configured.
 # -----------------------------------------------------------------------------

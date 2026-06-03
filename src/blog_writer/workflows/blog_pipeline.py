@@ -27,11 +27,9 @@ from blog_writer.agents import (
     build_critic_agent,
     build_fact_checker_agent,
     build_ideation_agent,
-    build_internal_knowledge_agent,
     build_orchestrator_agent,
     build_planner_agent,
     build_poc_builder_agent,
-    build_research_agent,
     build_writer_agent,
 )
 from blog_writer.config import AppConfig
@@ -50,7 +48,6 @@ from blog_writer.workflows.state import (
     Section,
 )
 
-
 # -----------------------------------------------------------------------------
 # Public entry point
 # -----------------------------------------------------------------------------
@@ -64,6 +61,38 @@ provides a Rich-based interactive implementation; tests provide a canned one;
 `--autonomous` mode bypasses the callback entirely.
 """
 
+EventCallback = Callable[[dict[str, Any]], None]
+"""Callback for structured pipeline events (used by the UI).
+
+Each event is a dict with at least a ``type`` key. Common types:
+
+* ``stage_start`` / ``stage_end`` — ``{type, stage, label}``
+* ``log``                          — ``{type, message}``
+* ``angles``                       — ``{type, angles: list[str]}``
+* ``outline``                      — ``{type, title, sections, pocs}``
+* ``poc_result``                   — ``{type, id, exit_code, attempts}``
+* ``critic``                       — ``{type, round, total, verdict, feedback}``
+* ``draft``                        — ``{type, markdown, iteration}``
+* ``done``                         — ``{type, final_verdict}``
+
+The CLI doesn't use this callback (it sticks with the simpler ``progress``
+hook); the FastAPI/WebSocket UI in ``ui/server.py`` does.
+"""
+
+
+def _make_emit(on_event: EventCallback | None) -> Callable[..., None]:
+    """Return a no-op-if-unset event emitter for use inside the pipeline."""
+
+    def emit(event_type: str, **kwargs: Any) -> None:
+        if on_event is None:
+            return
+        try:
+            on_event({"type": event_type, **kwargs})
+        except Exception:  # noqa: BLE001 - never let the UI break the pipeline
+            pass
+
+    return emit
+
 
 async def run_blog_pipeline(
     seed: str,
@@ -73,63 +102,236 @@ async def run_blog_pipeline(
     on_human_input: HumanCallback | None = None,
     autonomous: bool = False,
     progress: Callable[[str], None] | None = None,
+    on_event: EventCallback | None = None,
+    extra_instructions: str | None = None,
+    suggested_toc: str | None = None,
 ) -> BlogState:
-    """Run the full pipeline and return the final state."""
+    """Run the full pipeline and return the final state.
+
+    ``extra_instructions`` and ``suggested_toc`` are optional user-provided
+    steering knobs surfaced by the UI. They are appended to the Planner's
+    input so the user can pre-seed a table of contents or impose
+    constraints (tone, length, audience, etc.) without modifying prompts.
+    """
     models = models or load_model_map()
     state = BlogState(seed=seed)
+    state.extra_instructions = extra_instructions or ""
+    state.suggested_toc = suggested_toc or ""
     _log = progress or (lambda _msg: None)
+    emit = _make_emit(on_event)
+
+    def log_and_emit(msg: str) -> None:
+        _log(msg)
+        emit("log", message=msg)
 
     # 1. Ideation
-    _log("Generating angles…")
+    emit("stage_start", stage="ideation", label="Generating angles")
+    log_and_emit("Generating angles…")
     state = await _ideate(state, config=config, models=models)
-    _log(f"Generated {len(state.angles)} angles.")
+    log_and_emit(f"Generated {len(state.angles)} angles.")
+    emit("angles", angles=list(state.angles))
+    emit("stage_end", stage="ideation")
 
     # 2. Human checkpoint: pick angle
+    emit("stage_start", stage="pick_angle", label="Picking angle")
     state.angle = await _pick_angle(
         state,
         on_human_input=on_human_input,
         autonomous=autonomous,
     )
-    _log(f"Angle: {state.angle}")
+    log_and_emit(f"Angle: {state.angle}")
+    emit("angle_picked", angle=state.angle)
+    emit("stage_end", stage="pick_angle")
 
-    # 3. Internal knowledge + external research (sequential here; trivially
-    # parallelisable with asyncio.gather once we want to spend the API budget).
-    _log("Gathering internal best practices (MS Learn)…")
+    # 3. Internal knowledge + external research
+    emit("stage_start", stage="internal_knowledge", label="MS Learn (curated scope)")
+    log_and_emit("Gathering internal best practices (MS Learn)…")
     state = await _internal_knowledge(state, config=config, models=models)
-    _log(f"Got {len(state.internal_hits)} in-scope Learn hits.")
+    log_and_emit(f"Got {len(state.internal_hits)} in-scope Learn hits.")
+    emit(
+        "citations",
+        kind="internal",
+        items=[_citation_to_dict(c) for c in state.internal_hits],
+    )
+    emit("stage_end", stage="internal_knowledge")
 
-    _log("Gathering external research…")
+    emit("stage_start", stage="research", label="External research (broad)")
+    log_and_emit("Gathering external research…")
     state = await _external_research(state, config=config, models=models)
-    _log(f"Got {len(state.external_hits)} external hits.")
+    log_and_emit(f"Got {len(state.external_hits)} external hits.")
+    emit(
+        "citations",
+        kind="external",
+        items=[_citation_to_dict(c) for c in state.external_hits],
+    )
+    emit("stage_end", stage="research")
 
     # 4. Plan
-    _log("Drafting outline…")
+    emit("stage_start", stage="planner", label="Drafting outline")
+    log_and_emit("Drafting outline…")
     state = await _plan(state, config=config, models=models)
+    if state.outline:
+        emit(
+            "outline",
+            title=state.outline.title,
+            sections=[s.heading for s in state.outline.sections],
+            pocs=[
+                {"id": p.id, "description": p.description, "language": p.language}
+                for p in state.outline.pocs
+            ],
+        )
+    emit("stage_end", stage="planner")
 
     # 5. Human checkpoint: approve plan
+    emit("stage_start", stage="approve_plan", label="Plan approval")
     state.plan_approved = await _approve_plan(
         state,
         on_human_input=on_human_input,
         autonomous=autonomous,
     )
     if not state.plan_approved:
-        _log("Plan not approved. Aborting.")
+        log_and_emit("Plan not approved. Aborting.")
+        emit("stage_end", stage="approve_plan", approved=False)
+        emit("done", final_verdict="rejected_at_plan")
         return state
+    emit("stage_end", stage="approve_plan", approved=True)
 
     # 6. PoCs
-    _log(f"Building {len(state.outline.pocs) if state.outline else 0} PoC(s)…")
+    poc_count = len(state.outline.pocs) if state.outline else 0
+    emit("stage_start", stage="poc_builder", label=f"Building {poc_count} PoC(s)")
+    log_and_emit(f"Building {poc_count} PoC(s)…")
     state = await _build_pocs(state, config=config, models=models)
+    for r in state.poc_results:
+        emit(
+            "poc_result",
+            id=r.spec.id,
+            exit_code=r.exit_code,
+            attempts=r.attempts,
+            stdout=(r.stdout or "")[:1000],
+        )
+    emit("stage_end", stage="poc_builder")
 
     # 7. Writer ⇄ Critic revision loop
-    _log("Writing draft…")
+    emit("stage_start", stage="writer", label="Writing draft")
+    log_and_emit("Writing draft…")
     state = await _write_draft(state, config=config, models=models)
+    emit("draft", markdown=state.draft or "", iteration=state.iteration)
+    emit("stage_end", stage="writer")
+
+    emit("stage_start", stage="fact_checker", label="Fact-checking")
     state = await _fact_check(state, config=config, models=models)
-    state = await _critic_loop(state, config=config, models=models, log=_log)
+    emit(
+        "fact_findings",
+        items=[
+            {"section": f.section, "status": f.status, "claim": f.claim}
+            for f in state.fact_findings
+        ],
+    )
+    emit("stage_end", stage="fact_checker")
+
+    emit("stage_start", stage="critic", label="Critic review")
+    state = await _critic_loop(
+        state, config=config, models=models, log=log_and_emit, emit=emit
+    )
+    emit("stage_end", stage="critic")
 
     # 8. Final orchestrator review
-    _log("Final review…")
+    emit("stage_start", stage="final_review", label="Final review")
+    log_and_emit("Final review…")
     state = await _final_review(state, config=config, models=models)
+    emit("stage_end", stage="final_review")
+
+    emit("draft", markdown=state.draft or "", iteration=state.iteration)
+    emit("done", final_verdict=state.final_verdict or "approved")
     return state
+
+
+# -----------------------------------------------------------------------------
+# Revise — entry point for the UI's free-form edit loop
+# -----------------------------------------------------------------------------
+
+
+async def revise_blog_post(
+    state: BlogState,
+    instruction: str,
+    *,
+    config: AppConfig,
+    models: ModelMap | None = None,
+    on_event: EventCallback | None = None,
+    run_fact_check: bool = True,
+    run_critic: bool = True,
+) -> BlogState:
+    """Apply a free-form user instruction to the current draft.
+
+    Runs the Writer with the user's instruction injected as a revision
+    note, then (optionally) re-runs the Fact-Checker and one Critic pass
+    so the draft is still grounded and scored. Returns the updated state;
+    the caller is responsible for persisting it.
+
+    Use this from the UI's edit-mode loop: each user turn calls this once
+    and the new ``state.draft`` is rendered.
+    """
+    if not state.draft:
+        raise ValueError("revise_blog_post: state has no draft yet — run the pipeline first.")
+    if not instruction.strip():
+        raise ValueError("revise_blog_post: instruction is empty.")
+
+    models = models or load_model_map()
+    emit = _make_emit(on_event)
+
+    # Stash the instruction as if the critic had asked for it — the Writer
+    # already knows how to consume `state.latest_critic.feedback` on the
+    # next pass, so we don't need a special prompt path.
+    synthetic_verdict = CriticVerdict(
+        total=0,
+        verdict="revise",
+        scores={},
+        feedback=[f"User revision request: {instruction.strip()}"],
+    )
+    state.critic_verdicts.append(synthetic_verdict)
+
+    emit("stage_start", stage="writer", label="Applying revision")
+    state = await _write_draft(state, config=config, models=models)
+    emit("draft", markdown=state.draft or "", iteration=state.iteration)
+    emit("stage_end", stage="writer")
+
+    if run_fact_check:
+        emit("stage_start", stage="fact_checker", label="Re-checking facts")
+        state = await _fact_check(state, config=config, models=models)
+        emit(
+            "fact_findings",
+            items=[
+                {"section": f.section, "status": f.status, "claim": f.claim}
+                for f in state.fact_findings
+            ],
+        )
+        emit("stage_end", stage="fact_checker")
+
+    if run_critic:
+        emit("stage_start", stage="critic", label="Re-scoring draft")
+        verdict = await _critic_pass(state, config=config, models=models)
+        state.critic_verdicts.append(verdict)
+        emit(
+            "critic",
+            round=len(state.critic_verdicts),
+            total=verdict.total,
+            verdict=verdict.verdict,
+            feedback=list(verdict.feedback),
+        )
+        emit("stage_end", stage="critic")
+
+    emit("revision_done", iteration=state.iteration)
+    return state
+
+
+def _citation_to_dict(c: Citation) -> dict[str, str]:
+    return {
+        "key": c.key,
+        "kind": c.kind,
+        "title": c.title,
+        "url": c.url,
+        "summary": c.summary,
+    }
 
 
 # -----------------------------------------------------------------------------
@@ -440,11 +642,20 @@ async def _critic_loop(
     config: AppConfig,
     models: ModelMap,
     log: Callable[[str], None],
+    emit: Callable[..., None] | None = None,
 ) -> BlogState:
+    _emit = emit or (lambda *a, **kw: None)
     for revision in range(config.max_revisions + 1):
         verdict = await _critic_pass(state, config=config, models=models)
         state.critic_verdicts.append(verdict)
         log(f"Critic round {revision + 1}: total={verdict.total} -> {verdict.verdict}")
+        _emit(
+            "critic",
+            round=revision + 1,
+            total=verdict.total,
+            verdict=verdict.verdict,
+            feedback=list(verdict.feedback),
+        )
         if verdict.verdict == "accept" or verdict.total >= config.critic_threshold:
             return state
         if revision >= config.max_revisions:
@@ -454,6 +665,7 @@ async def _critic_loop(
             return state
         log("Revising draft…")
         state = await _write_draft(state, config=config, models=models)
+        _emit("draft", markdown=state.draft or "", iteration=state.iteration)
         state = await _fact_check(state, config=config, models=models)
     return state
 
@@ -582,12 +794,22 @@ def _parse_citations(text: str, *, kind: str, prefix: str) -> list[Citation]:
 
 
 def _planner_inputs(state: BlogState) -> str:
+    extras: list[str] = []
+    if state.suggested_toc.strip():
+        extras.append(
+            "User-suggested table of contents (use as a strong starting point, "
+            "but feel free to refine):\n" + state.suggested_toc.strip()
+        )
+    if state.extra_instructions.strip():
+        extras.append("Additional user instructions:\n" + state.extra_instructions.strip())
+    extras_block = ("\n\n" + "\n\n".join(extras)) if extras else ""
     return (
         f"Angle: {state.angle}\n\n"
         f"Internal best practices ({len(state.internal_hits)} hits):\n"
         + _citations_yaml(state, only="learn")
         + f"\n\nExternal research ({len(state.external_hits)} hits):\n"
         + _citations_yaml(state, only="external")
+        + extras_block
         + "\n\nReturn the YAML outline + PoC list as specified."
     )
 
@@ -598,11 +820,18 @@ def _writer_inputs(state: BlogState) -> str:
         f"stdout_snippet={r.stdout[:120]!r}"
         for r in state.poc_results
     )
+    extras = ""
+    if state.extra_instructions.strip():
+        extras = (
+            "\n\nAdditional user instructions to honor while writing:\n"
+            + state.extra_instructions.strip()
+        )
     return (
         f"Outline:\n{_outline_summary(state)}\n\n"
         f"Citations (use Learn first):\n{_citations_yaml(state)}\n\n"
-        f"PoC results:\n{pocs_summary}\n\n"
-        "Write the full Markdown draft now."
+        f"PoC results:\n{pocs_summary}"
+        + extras
+        + "\n\nWrite the full Markdown draft now."
     )
 
 

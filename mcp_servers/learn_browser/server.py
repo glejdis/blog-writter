@@ -27,7 +27,6 @@ from blog_writer.tools.learn_mcp import load_learn_scopes
 
 from . import core
 
-
 logger = logging.getLogger(__name__)
 
 

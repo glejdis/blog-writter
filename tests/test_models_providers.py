@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-
 from blog_writer.config import AppConfig
 from blog_writer.models import get_chat_client, load_model_map
 from blog_writer.models.providers import StubChatClient

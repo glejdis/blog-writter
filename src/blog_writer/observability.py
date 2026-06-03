@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def setup_observability(config: "AppConfig | None" = None) -> bool:
+def setup_observability(config: AppConfig | None = None) -> bool:
     """Configure OpenTelemetry exporters for the run.
 
     Returns ``True`` if any exporter was configured, ``False`` if telemetry

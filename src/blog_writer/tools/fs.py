@@ -6,7 +6,6 @@ import re
 import unicodedata
 from pathlib import Path
 
-
 _SLUG_STRIP = re.compile(r"[^a-z0-9]+")
 
 

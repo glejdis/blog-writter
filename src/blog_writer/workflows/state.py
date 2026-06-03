@@ -92,6 +92,10 @@ class BlogState:
     # Inputs
     seed: str
 
+    # Optional user-provided steering from the UI
+    extra_instructions: str = ""
+    suggested_toc: str = ""
+
     # After ideation + human pick
     angles: list[str] = field(default_factory=list)
     angle: str | None = None

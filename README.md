@@ -109,6 +109,33 @@ blog-writer new --seed "AI gateway patterns on Azure" --autonomous
 blog-writer new --seed "anything" --stub
 ```
 
+## Chat UI
+
+For an interactive experience — fill in a brief, watch each agent's progress
+live, answer human checkpoints in the browser, and revise the draft until
+you're happy — launch the built-in web UI:
+
+```pwsh
+# Install the UI extras (FastAPI + websockets — pure-Python, no C deps).
+uv pip install --constraint constraints.txt -e ".[ui]"
+
+# Start the server on http://127.0.0.1:8000
+blog-writer ui
+
+# Or pick a different host/port
+blog-writer ui --host 0.0.0.0 --port 8080
+```
+
+The UI is a single-page chat app built on FastAPI + WebSockets and vanilla
+JS. The left pane holds the brief form (topic, optional TOC, optional extra
+instructions, autonomous/stub toggles) and a live stage indicator. The right
+pane is the chat transcript plus the rendered draft. After the pipeline
+finishes, type free-form revision instructions into the bar at the bottom of
+the chat to iterate; each turn re-runs the Writer (and optionally the
+Fact-Checker + Critic) and ships an updated draft back into the UI. Drafts
+are persisted to `drafts/<slug>.md` after every successful pipeline run and
+every revision pass — the chat shows the saved path each time.
+
 ## Test
 
 ```pwsh
@@ -156,7 +183,12 @@ src/blog_writer/
   prompts/        # versioned system prompts (one .md per agent)
   observability.py
   config.py
-  cli.py
+  cli.py          # `blog-writer new` and `blog-writer ui`
+mcp_servers/
+  learn_browser/  # custom MCP server wrapping the official MS Learn MCP
+ui/
+  server.py       # FastAPI app + /ws WebSocket protocol
+  static/         # vanilla-JS single-page chat UI
 knowledge_base/
   learn_scopes.yaml   # allow-list of MS Learn root paths
 evals/            # sample seed topics + tiny eval harness
