@@ -31,6 +31,12 @@ dev = [
     "pytest-asyncio>=0.24",
     "ruff>=0.6",
 ]
+telemetry = [
+    # Pre-wired Azure Monitor / App Insights exporters. The base install
+    # already has OpenTelemetry via agent-framework-core; this extra is only
+    # needed when you want to ship traces to Application Insights.
+    "azure-monitor-opentelemetry>=1.6",
+]
 
 [project.scripts]
 blog-writer = "blog_writer.cli:app"

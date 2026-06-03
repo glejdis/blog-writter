@@ -40,6 +40,7 @@ for stream in (sys.stdout, sys.stderr):
             pass
 
 from blog_writer.config import AppConfig, load_config
+from blog_writer.observability import setup_observability
 from blog_writer.tools.fs import safe_write, slugify
 from blog_writer.workflows import BlogState, run_blog_pipeline
 
@@ -83,6 +84,10 @@ def new_post(
         overrides["critic_threshold"] = threshold
     config = load_config(**overrides)
     config.ensure_dirs()
+
+    # Wire OpenTelemetry exporters once per process. No-op if no telemetry
+    # backend is configured (env vars not set).
+    setup_observability(config)
 
     state = asyncio.run(
         run_blog_pipeline(

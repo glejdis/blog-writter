@@ -93,8 +93,38 @@ blog-writer new --seed "anything" --stub
 ## Test
 
 ```pwsh
+# Unit tests (fast, no network).
 pytest
+
+# Live integration test that hits the real MS Learn MCP server.
+$env:RUN_INTEGRATION_TESTS = "1"; pytest tests/test_learn_mcp_integration.py -v
 ```
+
+## Eval seeds
+
+The [`evals/`](evals/) folder ships sample seed topics with assertions
+about the produced draft (expected angle keywords, minimum citation counts,
+required substrings). Run them all with:
+
+```pwsh
+python -m evals.runner --stub        # quick sanity check
+python -m evals.runner               # real models — slower, costs tokens
+python -m evals.runner --only agentic-landing-zones
+```
+
+## Observability
+
+The Microsoft Agent Framework emits OpenTelemetry traces, metrics, and logs
+out of the box. The CLI calls `setup_observability()` at startup and wires
+exporters based on environment variables:
+
+| Env var | Effect |
+|---|---|
+| `BLOG_WRITER_TRACING_CONSOLE=true` | Print spans / metrics to the console |
+| `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317` | Ship to any OTLP collector (Jaeger / Tempo / AI Toolkit / OTel Collector) |
+| `APPLICATIONINSIGHTS_CONNECTION_STRING=...` | Ship to Azure Monitor — install with `pip install -e ".[telemetry]"` |
+
+If none are set, telemetry is silently disabled.
 
 ## Layout
 
@@ -105,10 +135,12 @@ src/blog_writer/
   workflows/      # the orchestration graph + shared state type
   models/         # per-agent model assignments + provider factories
   prompts/        # versioned system prompts (one .md per agent)
+  observability.py
   config.py
   cli.py
 knowledge_base/
   learn_scopes.yaml   # allow-list of MS Learn root paths
+evals/            # sample seed topics + tiny eval harness
 samples/          # generated PoCs
 drafts/           # generated drafts
 tests/

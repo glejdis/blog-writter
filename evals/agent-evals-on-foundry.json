@@ -1,0 +1,9 @@
+{
+  "id": "agent-evals-on-foundry",
+  "seed": "Continuous evaluation for agentic workloads on Azure AI Foundry",
+  "description": "How to set up batch + continuous evals for an agent so quality regressions are caught before they hit production.",
+  "expected_angle_keywords": ["evaluation", "agent"],
+  "min_internal_citations": 1,
+  "min_external_citations": 0,
+  "must_contain_in_draft": ["evaluation"]
+}

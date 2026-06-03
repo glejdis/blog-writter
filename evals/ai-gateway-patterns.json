@@ -1,0 +1,9 @@
+{
+  "id": "ai-gateway-patterns",
+  "seed": "AI gateway patterns on Azure for governing LLM access across teams",
+  "description": "Cross-cutting governance: API Management as the front door for OpenAI / Foundry, token budgets, prompt injection defenses, semantic caching.",
+  "expected_angle_keywords": ["gateway", "API Management"],
+  "min_internal_citations": 1,
+  "min_external_citations": 0,
+  "must_contain_in_draft": ["gateway"]
+}
