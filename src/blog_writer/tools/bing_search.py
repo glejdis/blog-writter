@@ -1,28 +1,19 @@
 """External web search for the Research agent.
 
-Strategy (whichever is configured wins; first match takes precedence):
+Backed by the project's **custom Learn Browser MCP server**
+(``mcp_servers/learn_browser/``) which wraps the official Microsoft Learn
+Docs MCP and optionally augments with public GitHub samples. No third-party
+API keys required.
 
-1. **Tavily** (recommended for new setups) — set ``TAVILY_API_KEY``.
-   Designed for agent / LLM workflows, generous free tier, returns clean
-   excerpts with URLs.
-2. **Bing Web Search v7** — set ``BING_SEARCH_API_KEY``. Being retired by
-   Microsoft for new customers but still works for existing tenants.
-3. **Foundry Bing Grounding** (placeholder) — set
-   ``BING_GROUNDING_CONNECTION_NAME``. This requires an Azure AI Foundry
-   project with a Bing connection. The framework doesn't currently expose
-   a typed tool for this; the marker class below is kept so we can plug it
-   in once ``agent_framework`` ships ``HostedWebSearchTool``.
-4. **Stub** — used when nothing above is configured. Returns canned hits
-   so the pipeline can still run end-to-end (used by the smoke test and
-   for offline dev).
-
-All four backends share the same return shape:
-``list[dict[str, str]]`` with keys ``title``, ``url``, ``snippet``, ``type``.
+The Foundry Bing-grounding-via-connection marker class is kept as a
+placeholder for the day ``agent-framework`` ships a typed
+``HostedWebSearchTool`` (until then it's unused — set
+``BING_GROUNDING_CONNECTION_NAME`` only if you want to track that you have a
+Foundry connection configured).
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 from dataclasses import dataclass
@@ -33,12 +24,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class BingSearchTool:
-    """Marker type describing a Foundry Bing grounding connection.
-
-    The actual tool wiring will land here once ``agent_framework`` ships a
-    typed ``HostedWebSearchTool``. For now this is consumed only as a flag
-    by the workflow ("yes, the user has a Bing connection configured").
-    """
+    """Marker type for a future Foundry Bing-grounding connection."""
 
     connection_name: str
 
@@ -49,127 +35,55 @@ class BingSearchTool:
 
 
 # -----------------------------------------------------------------------------
-# Real-mode search backends
+# Real search via the custom Learn Browser MCP server
 # -----------------------------------------------------------------------------
-
-
-async def _search_tavily(query: str, *, max_results: int = 5) -> list[dict[str, str]]:
-    api_key = os.environ.get("TAVILY_API_KEY")
-    if not api_key:
-        return []
-    try:
-        import httpx
-    except ImportError:  # pragma: no cover - httpx ships transitively with agent-framework
-        logger.warning("httpx not installed; cannot call Tavily")
-        return []
-    payload = {
-        "query": query,
-        "max_results": max_results,
-        "search_depth": "basic",
-        "include_answer": False,
-    }
-    headers = {"Authorization": f"Bearer {api_key}"}
-    try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            resp = await client.post(
-                "https://api.tavily.com/search", json=payload, headers=headers
-            )
-            resp.raise_for_status()
-            data = resp.json()
-    except Exception as exc:  # noqa: BLE001 - resilience over precision
-        logger.warning("Tavily search failed: %s", exc)
-        return []
-    hits: list[dict[str, str]] = []
-    for r in data.get("results") or []:
-        if not isinstance(r, dict):
-            continue
-        url = str(r.get("url") or "")
-        if not url:
-            continue
-        hits.append(
-            {
-                "title": str(r.get("title") or "Untitled"),
-                "url": url,
-                "snippet": str(r.get("content") or "")[:600],
-                "type": "external",
-            }
-        )
-    return hits
-
-
-async def _search_bing_v7(query: str, *, max_results: int = 5) -> list[dict[str, str]]:
-    api_key = os.environ.get("BING_SEARCH_API_KEY")
-    if not api_key:
-        return []
-    try:
-        import httpx
-    except ImportError:  # pragma: no cover
-        logger.warning("httpx not installed; cannot call Bing")
-        return []
-    headers = {"Ocp-Apim-Subscription-Key": api_key}
-    params = {"q": query, "count": max_results, "responseFilter": "Webpages"}
-    try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            resp = await client.get(
-                "https://api.bing.microsoft.com/v7.0/search",
-                params=params,
-                headers=headers,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Bing v7 search failed: %s", exc)
-        return []
-    pages = (data.get("webPages") or {}).get("value") or []
-    hits: list[dict[str, str]] = []
-    for r in pages:
-        if not isinstance(r, dict):
-            continue
-        url = str(r.get("url") or "")
-        if not url:
-            continue
-        hits.append(
-            {
-                "title": str(r.get("name") or "Untitled"),
-                "url": url,
-                "snippet": str(r.get("snippet") or "")[:600],
-                "type": "external",
-            }
-        )
-    return hits
 
 
 async def search_web(
     query: str,
     *,
-    max_results: int = 5,
-    timeout_s: int = 20,
+    learn_top_k: int = 5,
+    github_top_k: int = 3,
+    include_github: bool = True,
 ) -> list[dict[str, str]]:
-    """Run an external web search using whichever backend is configured.
+    """Run the Research-stage external search via the custom MCP server.
 
-    Tavily takes precedence over Bing v7 if both keys are present. Returns
-    ``[]`` if neither is configured (the caller can fall back to
-    ``bing_search_stub``).
+    Pulls broad Microsoft Learn hits (no allow-list — that's what makes them
+    "external" vs. the curated Internal Knowledge stage) and optionally
+    augments with public GitHub repos from the Azure-Samples / Azure /
+    microsoft orgs. Returns the same ``[{title, url, snippet, type}]`` shape
+    as the legacy stub so the workflow can stay agnostic.
+
+    Returns ``[]`` on failure; the caller should fall back to
+    :func:`bing_search_stub`.
     """
-    _ = timeout_s  # reserved for per-backend override; each backend pins its own
+    try:
+        from mcp_servers.learn_browser.core import search_for_research
+    except ImportError as exc:  # pragma: no cover - defensive
+        logger.warning("Learn Browser MCP unavailable: %s", exc)
+        return []
 
-    if os.environ.get("TAVILY_API_KEY"):
-        try:
-            return await asyncio.wait_for(
-                _search_tavily(query, max_results=max_results), timeout=timeout_s
-            )
-        except asyncio.TimeoutError:
-            logger.warning("Tavily search timed out after %ss", timeout_s)
-            return []
-    if os.environ.get("BING_SEARCH_API_KEY"):
-        try:
-            return await asyncio.wait_for(
-                _search_bing_v7(query, max_results=max_results), timeout=timeout_s
-            )
-        except asyncio.TimeoutError:
-            logger.warning("Bing v7 search timed out after %ss", timeout_s)
-            return []
-    return []
+    try:
+        raw = await search_for_research(
+            query,
+            learn_top_k=learn_top_k,
+            github_top_k=github_top_k,
+            include_github=include_github,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Learn Browser search failed: %s", exc)
+        return []
+
+    return [
+        {
+            "title": h.get("title", "Untitled"),
+            "url": h.get("url", ""),
+            "snippet": h.get("snippet", ""),
+            "type": h.get("source", "external"),
+        }
+        for h in raw
+        if h.get("url")
+    ]
 
 
 # -----------------------------------------------------------------------------

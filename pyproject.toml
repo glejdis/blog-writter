@@ -40,13 +40,14 @@ telemetry = [
 
 [project.scripts]
 blog-writer = "blog_writer.cli:app"
+learn-browser-mcp = "mcp_servers.learn_browser.__main__:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/blog_writer"]
+packages = ["src/blog_writer", "mcp_servers"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

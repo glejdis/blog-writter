@@ -13,7 +13,8 @@ Framework, Well-Architected, Architecture Center, AI Foundry docs) as the
 3. Pulls authoritative best-practice content from Microsoft Learn via the
    official **MS Learn Docs MCP server**, scoped to a curated allow-list of
    high-signal Learn roots (CAF / WAF / Architecture Center / AI Foundry).
-4. Fills external gaps via Bing grounding (recent blog posts, GitHub samples).
+4. Fills external gaps via the **custom Learn Browser MCP server** (broad
+   MS Learn search + optional Azure-Samples GitHub repos).
 5. Drafts an outline and a list of PoCs the blog will need. A human approves.
 6. Generates the PoCs as small runnable code, executes them in a sandbox,
    and captures the verified output.
@@ -31,7 +32,7 @@ Framework, Well-Architected, Architecture Center, AI Foundry docs) as the
 | Orchestrator (Editor-in-Chief) | Final review of assembled draft + samples | `gpt-5.4` |
 | Ideation | Seed → 3–5 angles | `gpt-5-mini` |
 | Internal Knowledge | MS Learn MCP search + scope filtering + summarize | `gpt-5-mini` |
-| Research | Bing-grounded external search, fills gaps | `gpt-5.4` |
+| Research | Broad MS Learn + Azure-Samples search via the custom Learn Browser MCP | `gpt-5.4` |
 | Planner | Outline + PoC requirements | reasoning model (`o4-mini`) |
 | PoC Builder | Generate code + run in sandbox + capture output | `gpt-5.3-codex` |
 | Writer | Long-form prose, Learn-first citations | `claude-opus-4-7` or `gpt-5.5` |
@@ -77,19 +78,23 @@ Copy `.env.example` to `.env` and fill in (at minimum) your Azure AI Foundry
 project endpoint or an OpenAI API key. Leave everything empty to run in stub
 mode.
 
-### External search backends (Research agent)
+### External search (Research agent)
 
-The Research agent pulls non-Learn sources (recent blog posts, GitHub repos,
-vendor docs). Pick one backend, in this priority order:
+The Research agent is backed by the project's **custom Learn Browser MCP
+server** (see [`mcp_servers/learn_browser/`](mcp_servers/learn_browser/)),
+which wraps the official Microsoft Learn Docs MCP and adds project-specific
+scoping, caching, and an optional Azure-Samples GitHub search.
 
-| Backend                         | Env var                            | Notes                                                                                          |
-|---------------------------------|------------------------------------|------------------------------------------------------------------------------------------------|
-| **Tavily** (recommended)        | `TAVILY_API_KEY`                   | Designed for LLM/agent workflows, generous free tier. https://tavily.com                       |
-| Bing Web Search v7              | `BING_SEARCH_API_KEY`              | Being retired by Microsoft for new customers — use only if you already have a subscription.    |
-| Foundry Bing grounding (future) | `BING_GROUNDING_CONNECTION_NAME`   | Placeholder until `agent-framework` ships a typed `HostedWebSearchTool`. Falls back to stub.   |
-| _(none)_                        | _(unset)_                          | Pipeline uses a small canned external list so the writer always has secondary references.      |
+**No API keys are required.** Optional knobs:
 
-When multiple keys are set, the leftmost backend in the table wins.
+| Env var                   | Purpose                                                                  |
+|---------------------------|--------------------------------------------------------------------------|
+| `GITHUB_TOKEN`            | Lifts the public GitHub search rate limit (10 → 30 req/min).             |
+| `LEARN_BROWSER_CACHE_DIR` | Override the on-disk cache root (default: `~/.cache/blog-writer/...`).   |
+
+The same server can be launched standalone and attached to Claude Desktop,
+VS Code AI Toolkit, Cursor, or any other MCP client — see the [server
+README](mcp_servers/learn_browser/README.md) for instructions.
 
 ## Run
 
