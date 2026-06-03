@@ -9,6 +9,7 @@ The actual orchestration (who calls whom, in what order) lives in
 
 from blog_writer.agents.base import build_agent
 from blog_writer.agents.critic import build_critic_agent
+from blog_writer.agents.diagrammer import build_diagrammer_agent
 from blog_writer.agents.fact_checker import build_fact_checker_agent
 from blog_writer.agents.ideation import build_ideation_agent
 from blog_writer.agents.internal_knowledge import build_internal_knowledge_agent
@@ -21,6 +22,7 @@ from blog_writer.agents.writer import build_writer_agent
 __all__ = [
     "build_agent",
     "build_critic_agent",
+    "build_diagrammer_agent",
     "build_fact_checker_agent",
     "build_ideation_agent",
     "build_internal_knowledge_agent",

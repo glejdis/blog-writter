@@ -194,21 +194,26 @@ def _make_azure_openai_client(model: str) -> BaseChatClient:
 
     endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT")
     api_key = os.environ.get("AZURE_OPENAI_API_KEY")
-    api_version = os.environ.get("AZURE_OPENAI_API_VERSION", "2025-04-01-preview")
-    if not (endpoint and api_key):
+    if not endpoint:
         warnings.warn(
-            "AZURE_OPENAI_ENDPOINT/AZURE_OPENAI_API_KEY not set — falling back to stub client.",
+            "AZURE_OPENAI_ENDPOINT not set — falling back to stub client.",
             stacklevel=2,
         )
         return StubChatClient(role="orchestrator", model_name=model)
-    # OpenAIChatClient accepts a base_url; Azure OpenAI is OpenAI-compatible at
-    # /openai/deployments/<deployment>/chat/completions?api-version=<v>.
-    base_url = f"{endpoint.rstrip('/')}/openai/deployments/{model}"
+
+    # When an API key is provided, use key auth. Otherwise authenticate with
+    # Microsoft Entra ID via DefaultAzureCredential — required when the account
+    # has local (key) auth disabled by policy. OpenAIChatClient auto-detects
+    # Azure when given azure_endpoint, and treats `model` as the deployment name.
+    if api_key:
+        return OpenAIChatClient(api_key=api_key, azure_endpoint=endpoint, model=model)
+
+    from azure.identity import DefaultAzureCredential
+
     return OpenAIChatClient(
-        api_key=api_key,
-        base_url=base_url,
-        model_id=model,
-        default_query={"api-version": api_version},
+        azure_endpoint=endpoint,
+        credential=DefaultAzureCredential(),
+        model=model,
     )
 
 

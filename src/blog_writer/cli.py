@@ -39,10 +39,17 @@ for stream in (sys.stdout, sys.stderr):
         except (ValueError, OSError):
             pass
 
-from blog_writer.config import AppConfig, load_config
+from dotenv import load_dotenv
+
+from blog_writer.config import PROJECT_ROOT, AppConfig, load_config
 from blog_writer.observability import setup_observability
 from blog_writer.tools.fs import safe_write, slugify
 from blog_writer.workflows import BlogState, run_blog_pipeline
+
+# Load .env into os.environ so vars read via os.environ.get (e.g.
+# AZURE_OPENAI_ENDPOINT) are available, not just the BLOG_WRITER_-prefixed
+# settings consumed by pydantic-settings.
+load_dotenv(PROJECT_ROOT / ".env")
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 console = Console()

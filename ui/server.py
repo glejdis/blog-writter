@@ -42,11 +42,19 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from blog_writer.config import load_config
+from blog_writer.config import PROJECT_ROOT, load_config
+
+# Load .env into os.environ so vars read via os.environ.get (e.g. the provider
+# endpoint and deep-research settings in models/providers.py and
+# tools/deep_research.py) are populated when the UI is launched directly via
+# `python -m ui.server` (the CLI launcher loads it too, but this makes the
+# server self-sufficient).
+load_dotenv(PROJECT_ROOT / ".env")
 from blog_writer.observability import setup_observability
 from blog_writer.workflows.blog_pipeline import (
     revise_blog_post,
@@ -132,6 +140,11 @@ async def _persist_draft(state: BlogState) -> tuple[str | None, str | None]:
     draft_path = Path(config.drafts_dir) / f"{slug}.md"
     sources_path = Path(config.drafts_dir) / f"{slug}.sources.json"
     draft_path.write_text(state.draft, encoding="utf-8")
+    diagram_path: str | None = None
+    if state.diagram_excalidraw:
+        excalidraw_path = Path(config.drafts_dir) / f"{slug}.excalidraw"
+        excalidraw_path.write_text(state.diagram_excalidraw, encoding="utf-8")
+        diagram_path = str(excalidraw_path)
     sources_payload = {
         "seed": state.seed,
         "angle": state.angle,
@@ -144,6 +157,11 @@ async def _persist_draft(state: BlogState) -> tuple[str | None, str | None]:
                 "pocs": [p.__dict__ for p in state.outline.pocs],
             }
             if state.outline
+            else None
+        ),
+        "diagram": (
+            {"title": state.diagram_title, "path": diagram_path}
+            if diagram_path
             else None
         ),
         "final_verdict": state.final_verdict,

@@ -25,6 +25,7 @@ from agent_framework import Agent
 
 from blog_writer.agents import (
     build_critic_agent,
+    build_diagrammer_agent,
     build_fact_checker_agent,
     build_ideation_agent,
     build_orchestrator_agent,
@@ -36,6 +37,13 @@ from blog_writer.config import AppConfig
 from blog_writer.models import ModelMap, load_model_map
 from blog_writer.tools.bing_search import bing_search_stub, search_web
 from blog_writer.tools.code_sandbox import run_in_sandbox
+from blog_writer.tools.deep_research import deep_research
+from blog_writer.tools.excalidraw import (
+    DiagramSpec,
+    parse_diagram_spec,
+    render_diagram,
+    spec_from_sections,
+)
 from blog_writer.tools.learn_mcp import load_learn_scopes, search_learn, search_learn_stub
 from blog_writer.workflows.state import (
     BlogState,
@@ -71,6 +79,7 @@ Each event is a dict with at least a ``type`` key. Common types:
 * ``angles``                       — ``{type, angles: list[str]}``
 * ``outline``                      — ``{type, title, sections, pocs}``
 * ``poc_result``                   — ``{type, id, exit_code, attempts}``
+* ``diagram``                      — ``{type, title, excalidraw, mermaid}``
 * ``critic``                       — ``{type, round, total, verdict, feedback}``
 * ``draft``                        — ``{type, markdown, iteration}``
 * ``done``                         — ``{type, final_verdict}``
@@ -210,6 +219,19 @@ async def run_blog_pipeline(
             stdout=(r.stdout or "")[:1000],
         )
     emit("stage_end", stage="poc_builder")
+
+    # 6b. Architecture diagram (Excalidraw + embeddable Mermaid)
+    if config.diagrams:
+        emit("stage_start", stage="diagrammer", label="Drawing architecture")
+        log_and_emit("Drawing architecture diagram…")
+        state = await _make_diagram(state, config=config, models=models)
+        emit(
+            "diagram",
+            title=state.diagram_title,
+            excalidraw=state.diagram_excalidraw,
+            mermaid=state.diagram_mermaid,
+        )
+        emit("stage_end", stage="diagrammer")
 
     # 7. Writer ⇄ Critic revision loop
     emit("stage_start", stage="writer", label="Writing draft")
@@ -434,6 +456,15 @@ async def _external_research(
 
     if config.stub:
         hits = await bing_search_stub(query)
+    elif config.deep_research:
+        # Agentic, Bing-grounded o3-deep-research pass. Produces a synthesized
+        # report plus real citations; fall back to lightweight search/stub if
+        # deep research is unconfigured or fails.
+        report, hits = await deep_research(query)
+        if report:
+            state.research_report = report
+        if not hits:
+            hits = await search_web(query) or await bing_search_stub(query)
     else:
         hits = await search_web(query)
         if not hits:
@@ -591,6 +622,77 @@ def _poc_prompt(
         f"stderr (truncated):\n{(previous.stderr or '')[:2000]}\n\n"
         f"stdout (truncated):\n{(previous.stdout or '')[:1000]}"
     )
+
+
+# -----------------------------------------------------------------------------
+# Stage 6b — Architecture diagram (Excalidraw + Mermaid)
+# -----------------------------------------------------------------------------
+
+
+async def _make_diagram(state: BlogState, *, config: AppConfig, models: ModelMap) -> BlogState:
+    """Build an architecture diagram for the post.
+
+    The diagrammer agent emits a small node/edge JSON spec; we render it
+    deterministically into an editable ``.excalidraw`` scene plus an
+    embeddable Mermaid flowchart. If the agent output can't be parsed we fall
+    back to a spec derived from the outline sections so a diagram is always
+    produced.
+    """
+    title = state.outline.title if state.outline else (state.angle or state.seed)
+    sections = [s.heading for s in state.outline.sections] if state.outline else []
+
+    spec: DiagramSpec | None = None
+    if config.stub:
+        spec = DiagramSpec(
+            title=title or "Architecture",
+            groups=[],
+            nodes=[
+                _diag_node("client", "Client"),
+                _diag_node("pipeline", "Agent Pipeline"),
+                _diag_node("learn", "MS Learn MCP"),
+                _diag_node("draft", "Draft"),
+            ],
+            edges=[
+                _diag_edge("client", "pipeline", "topic"),
+                _diag_edge("pipeline", "learn", "grounding"),
+                _diag_edge("pipeline", "draft"),
+            ],
+        )
+    else:
+        agent = build_diagrammer_agent(config, models)
+        response = await _run_agent(agent, _diagram_inputs(state))
+        spec = parse_diagram_spec(_text_of(response))
+
+    if spec is None or not spec.ok:
+        spec = spec_from_sections(title or "Architecture", sections)
+
+    artifacts = render_diagram(spec)
+    state.diagram_title = artifacts.title
+    state.diagram_excalidraw = artifacts.excalidraw
+    state.diagram_mermaid = artifacts.mermaid
+    return state
+
+
+def _diagram_inputs(state: BlogState) -> str:
+    poc_lines = "\n".join(f"- {r.spec.id} ({r.spec.section})" for r in state.poc_results)
+    return (
+        f"Title: {state.outline.title if state.outline else state.angle}\n\n"
+        f"Outline:\n{_outline_summary(state)}\n\n"
+        f"PoCs:\n{poc_lines or '(none)'}\n\n"
+        "Design the architecture diagram and return the JSON spec only."
+    )
+
+
+def _diag_node(node_id: str, label: str, group: str | None = None) -> Any:
+    from blog_writer.tools.excalidraw import DiagramNode
+
+    return DiagramNode(id=node_id, label=label, group=group)
+
+
+def _diag_edge(source: str, target: str, label: str = "") -> Any:
+    from blog_writer.tools.excalidraw import DiagramEdge
+
+    return DiagramEdge(source=source, target=target, label=label)
 
 
 # -----------------------------------------------------------------------------
@@ -803,12 +905,19 @@ def _planner_inputs(state: BlogState) -> str:
     if state.extra_instructions.strip():
         extras.append("Additional user instructions:\n" + state.extra_instructions.strip())
     extras_block = ("\n\n" + "\n\n".join(extras)) if extras else ""
+    report_block = (
+        "\n\nDeep-research briefing (synthesized, Bing-grounded):\n"
+        + state.research_report.strip()
+        if state.research_report.strip()
+        else ""
+    )
     return (
         f"Angle: {state.angle}\n\n"
         f"Internal best practices ({len(state.internal_hits)} hits):\n"
         + _citations_yaml(state, only="learn")
         + f"\n\nExternal research ({len(state.external_hits)} hits):\n"
         + _citations_yaml(state, only="external")
+        + report_block
         + extras_block
         + "\n\nReturn the YAML outline + PoC list as specified."
     )
@@ -826,10 +935,26 @@ def _writer_inputs(state: BlogState) -> str:
             "\n\nAdditional user instructions to honor while writing:\n"
             + state.extra_instructions.strip()
         )
+    report_block = ""
+    if state.research_report.strip():
+        report_block = (
+            "\n\nDeep-research briefing (synthesized, Bing-grounded — cite via the "
+            "external [E#] sources above):\n" + state.research_report.strip()
+        )
+    diagram_block = ""
+    if state.diagram_mermaid.strip():
+        diagram_block = (
+            "\n\nArchitecture diagram — embed this Mermaid block verbatim (inside a "
+            "```mermaid fence) in the most relevant section, with one sentence of "
+            "lead-in explaining what it shows:\n"
+            f"```mermaid\n{state.diagram_mermaid.strip()}\n```"
+        )
     return (
         f"Outline:\n{_outline_summary(state)}\n\n"
         f"Citations (use Learn first):\n{_citations_yaml(state)}\n\n"
         f"PoC results:\n{pocs_summary}"
+        + report_block
+        + diagram_block
         + extras
         + "\n\nWrite the full Markdown draft now."
     )

@@ -103,6 +103,8 @@ class BlogState:
     # After research
     internal_hits: list[Citation] = field(default_factory=list)
     external_hits: list[Citation] = field(default_factory=list)
+    # Synthesized narrative from the deep-research model (empty unless enabled).
+    research_report: str = ""
 
     # After planning
     outline: Outline | None = None
@@ -110,6 +112,11 @@ class BlogState:
 
     # After PoCs
     poc_results: list[PoCResult] = field(default_factory=list)
+
+    # After diagramming (architecture view)
+    diagram_title: str = ""
+    diagram_excalidraw: str = ""  # self-contained .excalidraw JSON
+    diagram_mermaid: str = ""  # embeddable flowchart for the draft
 
     # After writing
     draft: str | None = None

@@ -49,12 +49,27 @@ class AppConfig(BaseSettings):
         le=5,
         description="Max attempts the PoC Builder gets to produce a passing sample.",
     )
+    diagrams: bool = Field(
+        default=True,
+        description=(
+            "Generate an Excalidraw architecture diagram (and an embeddable Mermaid "
+            "flowchart) for each post. Disable with BLOG_WRITER_DIAGRAMS=false."
+        ),
+    )
 
     # ---- Tools ---------------------------------------------------------------
     sandbox: Sandbox = "local"
     ms_learn_mcp_url: str = Field(
         default="https://learn.microsoft.com/api/mcp",
         description="Override the MS Learn Docs MCP endpoint (rarely needed).",
+    )
+    deep_research: bool = Field(
+        default=False,
+        description=(
+            "Use the Foundry o3-deep-research model (agentic, Bing-grounded) for the "
+            "external research stage instead of the lightweight Learn/GitHub search. "
+            "Requires AZURE_AI_DEEP_RESEARCH_* env vars + a Bing grounding connection."
+        ),
     )
 
     # ---- Paths ---------------------------------------------------------------

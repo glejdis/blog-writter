@@ -9,20 +9,42 @@
       defer
       src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"
     ></script>
+    <script
+      defer
+      src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"
+    ></script>
+    <script>
+      window.addEventListener("DOMContentLoaded", () => {
+        if (window.mermaid) {
+          window.mermaid.initialize({
+            startOnLoad: false,
+            theme: "dark",
+            securityLevel: "loose",
+            flowchart: { curve: "basis", useMaxWidth: true },
+          });
+        }
+      });
+    </script>
     <script defer src="/static/app.js"></script>
   </head>
   <body>
     <header class="topbar">
       <div class="brand">
         <span class="dot"></span>
-        <strong>blog-writer</strong>
-        <span class="muted">multi-agent · MS Learn-grounded</span>
+        <div class="brand-text">
+          <strong>blog-writer</strong>
+          <span class="muted">multi-agent · MS Learn-grounded</span>
+        </div>
       </div>
       <div class="status" id="status">
         <span class="status-dot" id="status-dot"></span>
         <span id="status-text">connecting…</span>
       </div>
     </header>
+
+    <div class="progress" id="progress" aria-hidden="true">
+      <div class="progress-fill" id="progress-fill"></div>
+    </div>
 
     <main class="layout">
       <!-- LEFT: setup + stages -->
@@ -75,13 +97,31 @@
 
       <!-- RIGHT: chat + draft -->
       <section class="pane pane-right">
-        <div id="chat" class="chat"></div>
+        <div class="chat-toolbar">
+          <span class="chat-toolbar-title">Activity</span>
+          <button id="new-btn" class="ghost small" type="button" hidden>
+            + New post
+          </button>
+        </div>
+        <div id="chat" class="chat">
+          <div id="empty-state" class="empty-state">
+            <div class="empty-emoji">✍️</div>
+            <h3>Ready when you are</h3>
+            <p>
+              Enter a topic on the left and hit <strong>Start writing</strong>.
+              The agents will brainstorm angles, research Microsoft Learn,
+              build a proof-of-concept, draft the post, and self-critique it —
+              live, right here.
+            </p>
+          </div>
+        </div>
         <div id="draft-wrap" class="draft-wrap hidden">
           <div class="draft-head">
             <h2>Draft <span id="draft-iter" class="muted"></span></h2>
             <div class="draft-actions">
-              <button id="download-btn" type="button" disabled>Download .md</button>
-              <button id="accept-btn" type="button" disabled>Accept draft</button>
+              <button id="copy-btn" class="ghost small" type="button" disabled>Copy</button>
+              <button id="download-btn" class="ghost small" type="button" disabled>Download .md</button>
+              <button id="accept-btn" class="small" type="button" disabled>Accept draft</button>
             </div>
           </div>
           <article id="draft" class="draft"></article>

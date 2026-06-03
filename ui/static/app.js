@@ -15,6 +15,10 @@
   const reviseInput = $("revise-input");
   const briefForm = $("brief-form");
   const startBtn = $("start-btn");
+  const copyBtn = $("copy-btn");
+  const newBtn = $("new-btn");
+  const progressFill = $("progress-fill");
+  const emptyState = $("empty-state");
 
   const STAGE_ORDER = [
     ["ideation", "Ideation"],
@@ -24,11 +28,13 @@
     ["planner", "Planner"],
     ["approve_plan", "Plan approval"],
     ["poc_builder", "PoC builder"],
+    ["diagrammer", "Architecture"],
     ["writer", "Writer"],
     ["fact_checker", "Fact checker"],
     ["critic", "Critic"],
     ["final_review", "Final review"],
   ];
+  const STAGE_INDEX = new Map(STAGE_ORDER.map(([id], i) => [id, i]));
   const stageNodes = new Map();
   for (const [id, label] of STAGE_ORDER) {
     const li = document.createElement("li");
@@ -38,11 +44,31 @@
     stageNodes.set(id, li);
   }
 
+  function setProgress(stageId, done) {
+    const idx = STAGE_INDEX.get(stageId);
+    if (idx == null) return;
+    const pct = ((idx + (done ? 1 : 0.4)) / STAGE_ORDER.length) * 100;
+    progressFill.style.width = `${Math.min(100, pct)}%`;
+  }
+
+  function setBusy(busy) {
+    pipelineRunning = busy;
+    startBtn.disabled = busy;
+    startBtn.classList.toggle("busy", busy);
+    startBtn.textContent = busy ? "Working…" : "Start writing";
+  }
+
+  function hideEmptyState() {
+    if (emptyState && emptyState.parentNode) emptyState.remove();
+  }
+
   let ws = null;
   let currentDraft = "";
   let currentTitle = "blog-post";
   let downloadPath = null;
   let pipelineRunning = false;
+  let currentExcalidraw = null;
+  let currentDiagramTitle = "architecture";
 
   // -------------------------------------------------------------------------
   // WebSocket plumbing
@@ -60,8 +86,7 @@
       statusDot.classList.remove("ok");
       statusDot.classList.add("err");
       statusText.textContent = "disconnected — reload";
-      pipelineRunning = false;
-      startBtn.disabled = false;
+      setBusy(false);
     };
     ws.onerror = () => {
       statusDot.classList.add("err");
@@ -94,15 +119,19 @@
         break;
       case "stage_start":
         markStage(msg.stage, "running");
+        setProgress(msg.stage, false);
         break;
       case "stage_end":
         markStage(msg.stage, "done");
+        setProgress(msg.stage, true);
         break;
       case "log":
         addLog(msg.message);
         break;
       case "angles":
-        addCard("Angles", msg.angles.map((a) => `<li>${escape(a)}</li>`).join(""), "ul");
+        addCard("Angles", msg.angles.map((a) => `<li>${escape(a)}</li>`).join(""), "ul", {
+          icon: "💡",
+        });
         break;
       case "angle_picked":
         addLog(`Angle: ${msg.angle}`);
@@ -116,14 +145,24 @@
             (msg.stdout ? ` · stdout: ${truncate(msg.stdout, 100)}` : ""),
         );
         break;
-      case "critic":
+      case "diagram":
+        renderDiagram(msg);
+        break;
+      case "critic": {
+        const approved = String(msg.verdict || "").toLowerCase().includes("approve");
         addCard(
-          `Critic round ${msg.round} → ${msg.verdict} (${msg.total})`,
+          `Critic · round ${msg.round}`,
           (msg.feedback || []).map((f) => `<li>${escape(f)}</li>`).join("") ||
-            "<li>No feedback.</li>",
+            "<li>No feedback — looks good.</li>",
           "ul",
+          {
+            variant: approved ? "ok" : "warn",
+            icon: approved ? "✅" : "🔁",
+            badge: `${escape(msg.verdict)} · ${msg.total}`,
+          },
         );
         break;
+      }
       case "fact_findings":
         if (msg.items && msg.items.length) {
           addCard(
@@ -146,6 +185,7 @@
               )
               .join(""),
             "ul",
+            { icon: msg.kind === "internal" ? "📘" : "🌐" },
           );
         }
         break;
@@ -169,10 +209,12 @@
         }
         break;
       case "done":
-        pipelineRunning = false;
-        startBtn.disabled = false;
+        setBusy(false);
+        progressFill.style.width = "100%";
         downloadBtn.disabled = !currentDraft;
+        copyBtn.disabled = !currentDraft;
         acceptBtn.disabled = false;
+        newBtn.hidden = false;
         addSystem(
           `Pipeline complete — verdict: ${msg.final_verdict}. You can now ask for revisions below, or accept.`,
         );
@@ -237,10 +279,14 @@
     chat.appendChild(div);
     scroll();
   }
-  function addCard(title, bodyHtml, wrapper) {
+  function addCard(title, bodyHtml, wrapper, opts = {}) {
     const div = document.createElement("div");
-    div.className = "msg card";
-    div.innerHTML = `<h3>${escape(title)}</h3>` + (wrapper ? `<${wrapper}>${bodyHtml}</${wrapper}>` : bodyHtml);
+    div.className = "msg card" + (opts.variant ? ` card-${opts.variant}` : "");
+    const icon = opts.icon ? `<span class="card-icon">${opts.icon}</span>` : "";
+    const badge = opts.badge ? `<span class="card-badge">${opts.badge}</span>` : "";
+    div.innerHTML =
+      `<h3>${icon}<span>${escape(title)}</span>${badge}</h3>` +
+      (wrapper ? `<${wrapper}>${bodyHtml}</${wrapper}>` : bodyHtml);
     chat.appendChild(div);
     scroll();
   }
@@ -266,6 +312,68 @@
     );
   }
 
+  function slugify(value) {
+    return (
+      String(value || "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "")
+        .slice(0, 60) || "diagram"
+    );
+  }
+
+  function downloadText(text, filename, mime) {
+    if (!text) return;
+    const blob = new Blob([text], { type: mime || "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function renderDiagram(msg) {
+    hideEmptyState();
+    currentExcalidraw = msg.excalidraw || null;
+    currentDiagramTitle = msg.title || "architecture";
+    const slug = slugify(currentDiagramTitle);
+    const div = document.createElement("div");
+    div.className = "msg card diagram-card";
+    const titleSuffix = msg.title ? " · " + escape(msg.title) : "";
+    div.innerHTML =
+      `<h3><span class="card-icon">🗺️</span><span>Architecture${titleSuffix}</span></h3>` +
+      `<div class="diagram-render">Rendering diagram…</div>` +
+      `<div class="diagram-actions">` +
+      `<button type="button" class="diagram-dl"${currentExcalidraw ? "" : " disabled"}>Download .excalidraw</button>` +
+      `<a href="https://aka.ms/excalidraw" target="_blank" rel="noopener">Open in Excalidraw ↗</a>` +
+      `</div>`;
+    chat.appendChild(div);
+    const dlBtn = div.querySelector(".diagram-dl");
+    if (dlBtn) {
+      dlBtn.addEventListener("click", () =>
+        downloadText(currentExcalidraw, `${slug}.excalidraw`, "application/json"),
+      );
+    }
+    const target = div.querySelector(".diagram-render");
+    const code = msg.mermaid || "";
+    if (window.mermaid && code) {
+      const id = "mmd-" + Math.random().toString(36).slice(2);
+      Promise.resolve()
+        .then(() => window.mermaid.render(id, code))
+        .then(({ svg }) => {
+          target.innerHTML = svg;
+          scroll();
+        })
+        .catch(() => {
+          target.innerHTML = `<pre class="diagram-code">${escape(code)}</pre>`;
+        });
+    } else {
+      target.innerHTML = `<pre class="diagram-code">${escape(code)}</pre>`;
+    }
+    scroll();
+  }
+
   function renderDraft(markdown, iteration) {
     currentDraft = markdown || "";
     draftWrap.classList.remove("hidden");
@@ -276,6 +384,7 @@
       draftEl.textContent = currentDraft;
     }
     downloadBtn.disabled = false;
+    copyBtn.disabled = false;
   }
 
   function renderAsk(msg) {
@@ -332,8 +441,9 @@
     const topic = $("topic").value.trim();
     if (!topic) return;
     if (pipelineRunning) return;
-    pipelineRunning = true;
-    startBtn.disabled = true;
+    hideEmptyState();
+    newBtn.hidden = true;
+    setBusy(true);
     addUser(topic);
     send({
       type: "start",
@@ -375,6 +485,37 @@
     acceptBtn.disabled = true;
     reviseForm.classList.add("hidden");
     addSystem("Draft accepted. ✓");
+  });
+
+  copyBtn.addEventListener("click", async () => {
+    if (!currentDraft) return;
+    try {
+      await navigator.clipboard.writeText(currentDraft);
+      const prev = copyBtn.textContent;
+      copyBtn.textContent = "Copied ✓";
+      setTimeout(() => (copyBtn.textContent = prev), 1500);
+    } catch {
+      addError("Clipboard copy failed — use Download instead.");
+    }
+  });
+
+  newBtn.addEventListener("click", () => {
+    if (pipelineRunning) return;
+    chat.innerHTML = "";
+    draftWrap.classList.add("hidden");
+    reviseForm.classList.add("hidden");
+    draftEl.innerHTML = "";
+    currentDraft = "";
+    downloadPath = null;
+    currentExcalidraw = null;
+    downloadBtn.disabled = true;
+    copyBtn.disabled = true;
+    acceptBtn.disabled = true;
+    newBtn.hidden = true;
+    progressFill.style.width = "0%";
+    for (const li of stageNodes.values()) li.classList.remove("running", "done", "err");
+    addSystem("Started a new post. Fill in the brief on the left.");
+    $("topic").focus();
   });
 
   connect();

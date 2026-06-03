@@ -43,6 +43,14 @@ When the outline includes a PoC for a section:
 If a PoC failed (non-zero exit), call it out honestly in one sentence rather
 than hiding it.
 
+## Architecture diagram
+
+When the inputs include an architecture diagram as a Mermaid block, embed it
+**verbatim** inside a ```` ```mermaid ```` fence in the section where it makes
+the most sense (usually an early "how it fits together" section). Add one
+sentence of lead-in explaining what the reader is looking at. Do not redraw it
+in ASCII or describe every node.
+
 ## Output format
 
 Pure Markdown. Start with `# <title>` and end with `## Sources`. Do not wrap

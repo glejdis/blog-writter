@@ -47,6 +47,9 @@ async def test_pipeline_runs_end_to_end_in_stub_mode(tmp_path: Path) -> None:
     assert state.poc_results, "PoC builder should produce at least one result"
     assert state.poc_results[0].exit_code == 0, "stub sandbox PoC should succeed"
     assert state.draft, "writer should produce a draft"
+    assert state.diagram_excalidraw, "diagrammer should produce an excalidraw scene"
+    assert state.diagram_mermaid, "diagrammer should produce a mermaid flowchart"
+    assert "flowchart" in state.diagram_mermaid
     assert state.fact_findings is not None  # may be empty in stub mode, but the field exists
     assert state.critic_verdicts, "at least one critic verdict should be recorded"
     assert state.critic_verdicts[-1].total > 0, "critic verdict total should parse"
