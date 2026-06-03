@@ -77,6 +77,20 @@ Copy `.env.example` to `.env` and fill in (at minimum) your Azure AI Foundry
 project endpoint or an OpenAI API key. Leave everything empty to run in stub
 mode.
 
+### External search backends (Research agent)
+
+The Research agent pulls non-Learn sources (recent blog posts, GitHub repos,
+vendor docs). Pick one backend, in this priority order:
+
+| Backend                         | Env var                            | Notes                                                                                          |
+|---------------------------------|------------------------------------|------------------------------------------------------------------------------------------------|
+| **Tavily** (recommended)        | `TAVILY_API_KEY`                   | Designed for LLM/agent workflows, generous free tier. https://tavily.com                       |
+| Bing Web Search v7              | `BING_SEARCH_API_KEY`              | Being retired by Microsoft for new customers — use only if you already have a subscription.    |
+| Foundry Bing grounding (future) | `BING_GROUNDING_CONNECTION_NAME`   | Placeholder until `agent-framework` ships a typed `HostedWebSearchTool`. Falls back to stub.   |
+| _(none)_                        | _(unset)_                          | Pipeline uses a small canned external list so the writer always has secondary references.      |
+
+When multiple keys are set, the leftmost backend in the table wins.
+
 ## Run
 
 ```pwsh

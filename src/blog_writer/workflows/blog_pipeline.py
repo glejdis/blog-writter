@@ -36,7 +36,7 @@ from blog_writer.agents import (
 )
 from blog_writer.config import AppConfig
 from blog_writer.models import ModelMap, load_model_map
-from blog_writer.tools.bing_search import bing_search_stub
+from blog_writer.tools.bing_search import bing_search_stub, search_web
 from blog_writer.tools.code_sandbox import run_in_sandbox
 from blog_writer.tools.learn_mcp import load_learn_scopes, search_learn, search_learn_stub
 from blog_writer.workflows.state import (
@@ -220,28 +220,35 @@ async def _internal_knowledge(
 async def _external_research(
     state: BlogState, *, config: AppConfig, models: ModelMap
 ) -> BlogState:
-    if config.stub:
-        hits = await bing_search_stub(state.angle or state.seed)
-        state.external_hits = [
-            Citation(
-                key=f"E{i + 1}",
-                kind="external",
-                title=h["title"],
-                url=h["url"],
-                summary=h["snippet"],
-            )
-            for i, h in enumerate(hits)
-        ]
-        return state
+    """Stage 3 — fill gaps with external sources (Tavily / Bing v7).
 
-    agent = build_research_agent(config, models)
-    gap = _summarise_internal_gap(state)
-    response = await _run_agent(
-        agent,
-        f"Angle: {state.angle}\n\nInternal-knowledge gap to fill:\n{gap}",
-    )
-    text = _text_of(response)
-    state.external_hits = _parse_citations(text, kind="external", prefix="E")
+    Like Internal Knowledge, this uses a deterministic direct API call so
+    citations are always grounded in a real search result. When no external
+    search backend is configured (no TAVILY_API_KEY / BING_SEARCH_API_KEY),
+    we fall back to the canned stub list so the writer always has *some*
+    secondary references to balance the Learn-first citations.
+    """
+    query = state.angle or state.seed
+
+    if config.stub:
+        hits = await bing_search_stub(query)
+    else:
+        hits = await search_web(query)
+        if not hits:
+            # No external backend configured (or call failed) — keep the
+            # pipeline moving with the canned external list.
+            hits = await bing_search_stub(query)
+
+    state.external_hits = [
+        Citation(
+            key=f"E{i + 1}",
+            kind="external",
+            title=h["title"],
+            url=h["url"],
+            summary=h.get("snippet", ""),
+        )
+        for i, h in enumerate(hits)
+    ]
     return state
 
 
