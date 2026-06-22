@@ -1,0 +1,66 @@
+{
+  "seed": "From Azure Landing Zone to Secure AI: enterprise agentic deployment",
+  "angle": "From Azure Landing Zone to Secure AI: A Practical Guide to Enterprise Agentic Deployment (Part 1)",
+  "final_verdict": null,
+  "iterations": 0,
+  "citations": [
+    {
+      "key": "L1",
+      "kind": "learn",
+      "title": "Azure Well-Architected Framework — AI workloads",
+      "url": "https://learn.microsoft.com/en-us/azure/well-architected/ai/",
+      "summary": "AI workloads exhibit non-deterministic behavior, which makes them more adaptable but harder to reason about and contain than traditional workloads. Used to justify why agents need foundational design before deployment."
+    },
+    {
+      "key": "L2",
+      "kind": "learn",
+      "title": "Cloud Adoption Framework — AI adoption (AI Ready / Secure AI / Govern AI)",
+      "url": "https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/scenarios/ai/",
+      "summary": "CAF AI adoption spine: Strategy, Plan, Ready (AI networking, AI foundation, choose architecture), Govern, Secure, Manage. Provides the enterprise checklist for readying, securing, and governing an AI environment before deployment."
+    },
+    {
+      "key": "L3",
+      "kind": "learn",
+      "title": "Baseline Azure AI Foundry chat reference architecture",
+      "url": "https://learn.microsoft.com/en-us/azure/architecture/ai-ml/architecture/baseline-azure-ai-foundry-chat",
+      "summary": "Enterprise baseline: App Gateway + WAF ingress, App Service calls the agent over a private endpoint authenticated by managed identity, all PaaS (Azure OpenAI, AI Search, Storage, Cosmos DB, Agent Service) behind Private Link, outbound tool calls routed through Azure Firewall with FQDN egress rules, conversation state in Cosmos DB, content safety enforced in the agent runtime, prompt agents vs. hosted agents (Microsoft Agent Framework / Semantic Kernel) for deterministic, human-in-the-loop control."
+    },
+    {
+      "key": "L4",
+      "kind": "learn",
+      "title": "Azure AI Foundry — Use a virtual network with the Agent Service (Standard setup with private networking)",
+      "url": "https://learn.microsoft.com/en-us/azure/ai-foundry/agents/how-to/virtual-networks",
+      "summary": "Standard setup with private networking: bring your own VNet and a delegated subnet, agent compute is injected into it, no public egress by default, private resource access via credentials. Notes the recent Foundry RBAC role rename (Foundry User/Owner/Account Owner/Project Manager)."
+    },
+    {
+      "key": "L5",
+      "kind": "learn",
+      "title": "Azure AI Foundry — Standard agent setup",
+      "url": "https://learn.microsoft.com/en-us/azure/ai-foundry/agents/concepts/standard-agent-setup",
+      "summary": "Standard agent setup requires BYO resources so all agent data stays in your tenant: Azure Cosmos DB (thread/conversation + agent metadata, >=3000 RU/s across three containers), Azure Storage (files), Azure AI Search (vector stores), Azure Key Vault (secrets). Enforces project-level data isolation."
+    },
+    {
+      "key": "L6",
+      "kind": "learn",
+      "title": "Azure AI Content Safety — Prompt Shields",
+      "url": "https://learn.microsoft.com/en-us/azure/ai-services/content-safety/concepts/jailbreak-detection",
+      "summary": "Prompt Shields is a unified Content Safety API that detects and blocks adversarial input (jailbreak / prompt-injection) in user prompts and documents before content is generated. Used as the platform-level answer to untrusted content as a security boundary."
+    },
+    {
+      "key": "L7",
+      "kind": "learn",
+      "title": "Azure OpenAI — Role-based access control",
+      "url": "https://learn.microsoft.com/en-us/azure/ai-services/openai/how-to/role-based-access-control",
+      "summary": "Cognitive Services OpenAI User grants inference API calls with Microsoft Entra ID but not key access, deployment creation, or quota. Confirms the least-privilege role used for a read-only inference path."
+    }
+  ],
+  "pocs": [
+    {
+      "id": "landing-zone-to-secure-ai",
+      "path": "samples/landing-zone-to-secure-ai/lab-build.md",
+      "exit_code": null,
+      "stdout_excerpt": "Companion build guide (Azure CLI + Bicep). Not yet executed in a sandbox."
+    }
+  ],
+  "critic_history": []
+}
