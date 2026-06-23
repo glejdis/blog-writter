@@ -115,6 +115,11 @@
                 placeholder="# Your title&#10;&#10;Paste the whole post here — it keeps your structure and voice."
               ></textarea>
             </label>
+            <label>
+              …or import a file (.md)
+              <input id="improve-file" type="file" accept=".md,.markdown,.txt,text/markdown,text/plain" />
+              <span id="improve-file-status" class="muted reference-status hidden"></span>
+            </label>
             <details>
               <summary>…or read a file on the server</summary>
               <label>
@@ -148,6 +153,13 @@
                 </label>
               </div>
             </details>
+            <p class="muted improve-hint">
+              Returns a fully optimized <code>.md</code> — your structure &amp; voice
+              kept, improvements applied, and Learn-first citations woven in with a
+              <code>## Sources</code> section. Tick
+              <strong>Optional steering → Recommend only</strong> to just see a list of
+              suggestions instead.
+            </p>
             <button id="improve-btn" type="submit">Improve draft</button>
           </form>
         </div>

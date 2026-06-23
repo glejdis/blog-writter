@@ -24,6 +24,8 @@
   const emptyState = $("empty-state");
   const improveForm = $("improve-form");
   const improveBtn = $("improve-btn");
+  const improveFile = $("improve-file");
+  const improveFileStatus = $("improve-file-status");
   const modeToggle = $("mode-toggle");
   const modeNew = $("mode-new");
   const modeImprove = $("mode-improve");
@@ -84,6 +86,9 @@
   let currentExcalidraw = null;
   let currentDiagramTitle = "architecture";
   let referenceDraft = "";
+  // Base name for the optimized download in "Improve a draft" mode (from the
+  // imported filename); falls back to the draft's H1 title.
+  let improvedName = "";
 
   // -------------------------------------------------------------------------
   // WebSocket plumbing (with automatic reconnect)
@@ -281,11 +286,17 @@
         acceptBtn.disabled = !hasDraft;
         newBtn.hidden = false;
         if (improveMode) {
-          addSystem(
-            hasDraft
-              ? "Draft improved — sources added and recommendations applied. Revise further below, or accept."
-              : "Recommendations and sources ready. Toggle off “Recommend only” to also rewrite the draft.",
-          );
+          if (hasDraft) {
+            // Auto-download the optimized .md as soon as the rewrite is ready.
+            downloadMarkdown();
+            addSystem(
+              "Draft improved — optimized .md downloaded automatically (improvements applied, citations woven in). Revise further below, or accept.",
+            );
+          } else {
+            addSystem(
+              "Recommendations and sources ready. Toggle off “Recommend only” to also rewrite the draft.",
+            );
+          }
         } else {
           addSystem(
             `Pipeline complete — verdict: ${msg.final_verdict}. You can now ask for revisions below, or accept.`,
@@ -452,6 +463,12 @@
 
   function renderDraft(markdown, iteration) {
     currentDraft = markdown || "";
+    // Derive a real title from the draft's H1 when we don't have one yet (the
+    // improve flow emits no outline event) so downloads/PDF aren't "blog-post".
+    if (!currentTitle || currentTitle === "blog-post") {
+      const h1 = currentDraft.match(/^#\s+(.+?)\s*$/m);
+      if (h1) currentTitle = h1[1].trim();
+    }
     draftWrap.classList.remove("hidden");
     draftIter.textContent = `· iteration ${iteration ?? "?"}`;
     if (window.marked) {
@@ -519,6 +536,9 @@
     if (!topic) return;
     if (pipelineRunning) return;
     improveMode = false;
+    currentTitle = "blog-post";
+    improvedName = "";
+    currentDraft = "";
     hideEmptyState();
     newBtn.hidden = true;
     setBusy(true);
@@ -559,6 +579,14 @@
         return;
       }
       improveMode = true;
+      // Reset the title and name the optimized download after the imported file
+      // (when one was used); otherwise renderDraft derives it from the H1.
+      currentTitle = "blog-post";
+      currentDraft = "";
+      const importedFile = improveFile && improveFile.files && improveFile.files[0];
+      improvedName = importedFile
+        ? importedFile.name.replace(/\.(md|markdown|txt)$/i, "")
+        : "";
       hideEmptyState();
       newBtn.hidden = true;
       setBusy(true);
@@ -609,6 +637,39 @@
     });
   }
 
+  // Import a local .md file into the "Improve a draft" textarea so it flows
+  // through the normal submit path (the server reads $("improve-draft").value).
+  if (improveFile) {
+    improveFile.addEventListener("change", async () => {
+      const file = improveFile.files && improveFile.files[0];
+      if (!file) return;
+      const MAX_BYTES = 1_000_000; // 1 MB guard
+      if (file.size > MAX_BYTES) {
+        improveFile.value = "";
+        if (improveFileStatus) {
+          improveFileStatus.textContent = "File too large (max 1 MB).";
+          improveFileStatus.classList.remove("hidden");
+        }
+        return;
+      }
+      try {
+        const text = await file.text();
+        const target = $("improve-draft");
+        if (target) target.value = text;
+        if (improveFileStatus) {
+          const kb = Math.max(1, Math.round(file.size / 1024));
+          improveFileStatus.textContent = `Loaded ${file.name} (${kb} KB) into the draft above.`;
+          improveFileStatus.classList.remove("hidden");
+        }
+      } catch (err) {
+        if (improveFileStatus) {
+          improveFileStatus.textContent = "Couldn't read that file.";
+          improveFileStatus.classList.remove("hidden");
+        }
+      }
+    });
+  }
+
   reviseForm.addEventListener("submit", (e) => {
     e.preventDefault();
     const instruction = reviseInput.value.trim();
@@ -618,21 +679,27 @@
     send({ type: "revise", instruction });
   });
 
-  downloadBtn.addEventListener("click", () => {
+  function downloadMarkdown() {
     if (!currentDraft) return;
-    const slug = (currentTitle || "blog-post")
+    const base = improveMode && improvedName ? improvedName : currentTitle;
+    const slug = (base || "blog-post")
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "")
       .slice(0, 60) || "blog-post";
+    // In improve mode the download is the optimized version of the input — make
+    // that explicit so it sits alongside the original file.
+    const name = improveMode ? `${slug}.optimized.md` : `${slug}.md`;
     const blob = new Blob([currentDraft], { type: "text/markdown" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${slug}.md`;
+    a.download = name;
     a.click();
     URL.revokeObjectURL(url);
-  });
+  }
+
+  downloadBtn.addEventListener("click", downloadMarkdown);
 
   downloadPdfBtn.addEventListener("click", () => {
     if (!currentDraft) return;
