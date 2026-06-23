@@ -6,6 +6,7 @@ import json
 
 from blog_writer.tools.excalidraw import (
     DiagramEdge,
+    DiagramGroup,
     DiagramNode,
     DiagramSpec,
     build_excalidraw,
@@ -111,3 +112,91 @@ def test_render_diagram_round_trip() -> None:
     assert artifacts.edge_count == 2
     assert validate_excalidraw(json.loads(artifacts.excalidraw)) == []
     assert "flowchart" in artifacts.mermaid
+
+
+def _nested_spec() -> DiagramSpec:
+    return DiagramSpec(
+        title="Nested architecture",
+        groups=[
+            DiagramGroup(id="spoke", label="AI Spoke VNet", color="blue"),
+            DiagramGroup(id="pe", label="Private Endpoints", color="green", parent="spoke"),
+        ],
+        nodes=[
+            DiagramNode(id="user", label="Internal User", shape="stadium"),
+            DiagramNode(id="app", label="Chat UI", group="spoke"),
+            DiagramNode(id="search", label="Azure AI Search", group="pe", shape="cylinder"),
+        ],
+        edges=[
+            DiagramEdge(source="user", target="app", label="HTTPS"),
+            DiagramEdge(source="app", target="search"),
+        ],
+    )
+
+
+def test_mermaid_emits_nested_subgraphs_and_shapes() -> None:
+    mermaid = build_mermaid(_nested_spec())
+    lines = mermaid.splitlines()
+    # One subgraph per group; the inner one nested deeper than the outer.
+    assert mermaid.count("subgraph ") == 2
+    assert any(line.strip() == "end" for line in lines)
+    outer = next(ln for ln in lines if "AI Spoke VNet" in ln)
+    inner = next(ln for ln in lines if "Private Endpoints" in ln)
+    indent = lambda ln: len(ln) - len(ln.lstrip())  # noqa: E731
+    assert indent(inner) > indent(outer)
+    # Shapes survive into the Mermaid node declarations.
+    assert '(["Internal User"])' in mermaid  # stadium
+    assert '[("Azure AI Search")]' in mermaid  # cylinder
+    # Edges and colour classes are still emitted after the subgraphs.
+    assert "-->|HTTPS|" in mermaid
+    assert "classDef" in mermaid
+
+
+def test_excalidraw_draws_group_boxes_and_shapes() -> None:
+    scene = json.loads(build_excalidraw(_nested_spec()))
+    assert validate_excalidraw(scene) == []
+    ids = [el["id"] for el in scene["elements"]]
+    assert len(ids) == len(set(ids))
+    # One boundary box per group.
+    assert "group-spoke" in ids
+    assert "group-pe" in ids
+    types = {el["id"]: el["type"] for el in scene["elements"]}
+    assert types["node-user"] == "ellipse"  # stadium -> ellipse
+    assert types["node-app"] == "rectangle"
+    # The stadium node still carries its bound text label.
+    user = next(el for el in scene["elements"] if el["id"] == "node-user")
+    assert any(b["type"] == "text" for b in user["boundElements"])
+
+
+def test_parse_spec_reads_shape_and_parent() -> None:
+    text = (
+        '{"title":"T",'
+        '"groups":[{"id":"out","label":"Outer"},'
+        '{"id":"in","label":"Inner","parent":"out"}],'
+        '"nodes":[{"id":"a","label":"A","shape":"stadium"},'
+        '{"id":"b","label":"B","group":"in","shape":"bogus"}],'
+        '"edges":[{"from":"a","to":"b"}]}'
+    )
+    spec = parse_diagram_spec(text)
+    assert spec is not None
+    by_id = {g.id: g for g in spec.groups}
+    assert by_id["in"].parent == "out"
+    assert by_id["out"].parent is None
+    nodes = {n.id: n for n in spec.nodes}
+    assert nodes["a"].shape == "stadium"
+    assert nodes["b"].shape is None  # unknown shape is dropped
+
+
+def test_parse_spec_breaks_group_cycles() -> None:
+    text = (
+        '{"title":"T",'
+        '"groups":[{"id":"x","label":"X","parent":"y"},'
+        '{"id":"y","label":"Y","parent":"x"}],'
+        '"nodes":[{"id":"a","label":"A","group":"x"}]}'
+    )
+    spec = parse_diagram_spec(text)
+    assert spec is not None
+    parents = {g.id: g.parent for g in spec.groups}
+    # The cycle is broken so the renderers can't recurse forever.
+    assert not (parents["x"] == "y" and parents["y"] == "x")
+    # And it still renders without error.
+    assert validate_excalidraw(json.loads(build_excalidraw(spec))) == []

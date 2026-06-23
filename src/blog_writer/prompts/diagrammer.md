@@ -20,8 +20,16 @@ Mermaid flowchart.
 - Aim for **6–14 nodes**. Fewer is fine for a simple topic; never exceed ~16.
 - Use **edges** for the direction of a request, a message, or a dependency.
   Add a short `label` only when it clarifies (e.g. "PCM audio", "AcrPull").
-- Use **groups** to cluster nodes that belong to the same tier or boundary
-  (e.g. "Azure", "Client", "Data"). Give each group a `color`.
+- Use **groups** to cluster nodes that share a tier or trust boundary (e.g.
+  "Hub VNet", "AI Spoke", "Data"). Give each group a `color`.
+- **Nest** boundaries when one sits inside another: give the inner group a
+  `parent` pointing at the outer group's `id` (e.g. a "Private Endpoints" group
+  whose `parent` is the "AI Spoke" VNet). Nest at most ~3 levels deep.
+- Pick a **shape** per node to signal its kind:
+  - `stadium` for human actors, clients, and external systems/APIs,
+  - `cylinder` for data stores (databases, storage, queues, caches),
+  - `hexagon` for gateways / firewalls / policy enforcement points,
+  - omit `shape` (default rounded rectangle) for everything else.
 
 ## Output format (strict)
 
@@ -31,13 +39,16 @@ Return **only** a single JSON object — no prose, no Markdown fences:
 {
   "title": "string — short diagram title",
   "groups": [
-    { "id": "azure", "label": "Azure", "color": "blue" }
+    { "id": "spoke", "label": "AI Spoke VNet", "color": "blue" },
+    { "id": "pe", "label": "Private Endpoints", "color": "green", "parent": "spoke" }
   ],
   "nodes": [
-    { "id": "gw", "label": "API Gateway", "group": "azure" }
+    { "id": "user", "label": "Internal User", "shape": "stadium" },
+    { "id": "app", "label": "Chat UI", "group": "spoke" },
+    { "id": "search", "label": "Azure AI Search", "group": "pe", "shape": "cylinder" }
   ],
   "edges": [
-    { "from": "client", "to": "gw", "label": "HTTPS" }
+    { "from": "user", "to": "app", "label": "HTTPS" }
   ]
 }
 ```
@@ -45,7 +56,12 @@ Return **only** a single JSON object — no prose, no Markdown fences:
 Rules:
 
 - `color` must be one of: `blue`, `green`, `purple`, `teal`, `orange`, `gray`.
+  Colours map automatically to a light Fluent UI palette in both artifacts.
+- `shape` (optional) must be one of: `stadium`, `cylinder`, `hexagon`,
+  `rounded`, `rectangle`. Omit it for a plain rounded box.
+- `parent` (optional) on a group must reference another group's `id` to nest it.
 - Every `edge.from` / `edge.to` must reference a declared `node.id`.
 - `id`s are short slugs (lowercase, no spaces). `label`s are human-readable.
-- Keep labels under ~24 characters so they fit inside a node box.
+- Keep labels under ~24 characters; use a single `\n` to wrap a long label
+  onto two lines.
 - Do not invent components the post doesn't discuss.

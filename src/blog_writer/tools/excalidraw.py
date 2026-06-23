@@ -31,28 +31,38 @@ MARGIN = 50
 TITLE_FONT = 28
 NODE_FONT = 16
 EDGE_FONT = 14
+# Boundary boxes drawn behind grouped nodes (Excalidraw companion).
+GROUP_PAD = 16
+GROUP_LABEL_H = 24
+GROUP_FONT = 15
 
-# FluentUI-ish palette: name -> (strokeColor, backgroundColor). Backgrounds are
-# the light Excalidraw tints so black text stays readable on top.
+# Fluent UI palette: name -> (strokeColor, backgroundColor). Backgrounds are the
+# light Fluent tints so black text stays readable on top. Kept in sync with the
+# Mermaid palette below so the .excalidraw companion and the embedded flowchart
+# look identical.
 PALETTE: dict[str, tuple[str, str]] = {
-    "blue": ("#1971c2", "#a5d8ff"),
-    "green": ("#2f9e44", "#b2f2bb"),
-    "purple": ("#7048e8", "#d0bfff"),
-    "teal": ("#0c8599", "#99e9f2"),
-    "orange": ("#e8590c", "#ffd8a8"),
-    "gray": ("#495057", "#e9ecef"),
+    "blue": ("#0078D4", "#CFE4FA"),
+    "green": ("#107C10", "#DFF6DD"),
+    "purple": ("#5C2D91", "#E8DAEF"),
+    "teal": ("#038387", "#CCEFF1"),
+    "orange": ("#F7630C", "#FFF4CE"),
+    "gray": ("#495057", "#F3F2F1"),
 }
-# Mermaid uses solid fills, so pair each colour with a darker stroke.
+# Mermaid pairs the same light fill with the matching darker stroke.
 MERMAID_PALETTE: dict[str, tuple[str, str]] = {
-    "blue": ("#a5d8ff", "#1971c2"),
-    "green": ("#b2f2bb", "#2f9e44"),
-    "purple": ("#d0bfff", "#7048e8"),
-    "teal": ("#99e9f2", "#0c8599"),
-    "orange": ("#ffd8a8", "#e8590c"),
-    "gray": ("#e9ecef", "#495057"),
+    "blue": ("#CFE4FA", "#0078D4"),
+    "green": ("#DFF6DD", "#107C10"),
+    "purple": ("#E8DAEF", "#5C2D91"),
+    "teal": ("#CCEFF1", "#038387"),
+    "orange": ("#FFF4CE", "#F7630C"),
+    "gray": ("#F3F2F1", "#495057"),
 }
 _DEFAULT_COLOR = "gray"
 _PALETTE_CYCLE = ("blue", "green", "purple", "teal", "orange")
+
+# Node shapes the spec may request. Default is a rounded rectangle.
+_SHAPES = frozenset({"rectangle", "rounded", "stadium", "cylinder", "hexagon"})
+_DEFAULT_SHAPE = "rectangle"
 
 
 # ---- Spec dataclasses -------------------------------------------------------
@@ -63,6 +73,7 @@ class DiagramNode:
     id: str
     label: str
     group: str | None = None
+    shape: str | None = None  # one of _SHAPES; None -> rounded rectangle
 
 
 @dataclass(frozen=True)
@@ -77,6 +88,7 @@ class DiagramGroup:
     id: str
     label: str
     color: str | None = None
+    parent: str | None = None  # id of an enclosing group, for nested boundaries
 
 
 @dataclass(frozen=True)
@@ -124,7 +136,17 @@ def _coerce_spec(data: dict) -> DiagramSpec | None:
             continue
         seen.add(nid)
         group = n.get("group")
-        nodes.append(DiagramNode(id=nid, label=label or nid, group=str(group) if group else None))
+        shape = str(n.get("shape") or "").strip().lower() or None
+        if shape not in _SHAPES:
+            shape = None
+        nodes.append(
+            DiagramNode(
+                id=nid,
+                label=label or nid,
+                group=str(group) if group else None,
+                shape=shape,
+            )
+        )
     if not nodes:
         return None
 
@@ -144,17 +166,34 @@ def _coerce_spec(data: dict) -> DiagramSpec | None:
         edges.append(DiagramEdge(source=src, target=dst, label=str(e.get("label") or "").strip()))
 
     groups: list[DiagramGroup] = []
+    group_ids: set[str] = set()
+    raw_parents: dict[str, str | None] = {}
     for g in data.get("groups") or []:
         if not isinstance(g, dict):
             continue
         gid = str(g.get("id") or g.get("label") or "").strip()
-        if not gid:
+        if not gid or gid in group_ids:
             continue
+        group_ids.add(gid)
         color = g.get("color")
         color = str(color).lower() if color else None
         if color not in PALETTE:
             color = None
+        raw_parents[gid] = str(g.get("parent") or "").strip() or None
         groups.append(DiagramGroup(id=gid, label=str(g.get("label") or gid), color=color))
+
+    # Resolve parents now that every group id is known: drop dangling or
+    # self-referential parents, then break any cycles.
+    groups = [
+        DiagramGroup(
+            id=g.id,
+            label=g.label,
+            color=g.color,
+            parent=(raw_parents[g.id] if raw_parents[g.id] in group_ids and raw_parents[g.id] != g.id else None),
+        )
+        for g in groups
+    ]
+    groups = _break_group_cycles(groups)
 
     title = str(data.get("title") or "Architecture").strip() or "Architecture"
     return DiagramSpec(title=title, nodes=nodes, edges=edges, groups=groups)
@@ -171,6 +210,58 @@ def spec_from_sections(title: str, sections: list[str]) -> DiagramSpec:
         nodes = [DiagramNode(id="s0", label=title)]
     edges = [DiagramEdge(source=nodes[i].id, target=nodes[i + 1].id) for i in range(len(nodes) - 1)]
     return DiagramSpec(title=title or "Architecture", nodes=nodes, edges=edges)
+
+
+# ---- Group tree helpers -----------------------------------------------------
+
+
+def _break_group_cycles(groups: list[DiagramGroup]) -> list[DiagramGroup]:
+    """Null out any ``parent`` that would create a cycle in the group tree."""
+    by_id = {g.id: g for g in groups}
+    out: list[DiagramGroup] = []
+    for g in groups:
+        seen = {g.id}
+        cur = g.parent
+        cyclic = False
+        while cur:
+            if cur in seen or cur not in by_id:
+                cyclic = cur in seen
+                break
+            seen.add(cur)
+            cur = by_id[cur].parent
+        if cyclic and g.parent:
+            out.append(DiagramGroup(id=g.id, label=g.label, color=g.color, parent=None))
+        else:
+            out.append(g)
+    return out
+
+
+def _group_relations(
+    spec: DiagramSpec,
+) -> tuple[
+    dict[str, DiagramGroup],
+    dict[str, list[str]],
+    list[str],
+    dict[str, list[DiagramNode]],
+    list[DiagramNode],
+]:
+    """Return (groups_by_id, children, roots, nodes_in_group, ungrouped_nodes)."""
+    by_id = {g.id: g for g in spec.groups}
+    children: dict[str, list[str]] = {g.id: [] for g in spec.groups}
+    roots: list[str] = []
+    for g in spec.groups:
+        if g.parent and g.parent in by_id:
+            children[g.parent].append(g.id)
+        else:
+            roots.append(g.id)
+    nodes_in: dict[str, list[DiagramNode]] = {g.id: [] for g in spec.groups}
+    ungrouped: list[DiagramNode] = []
+    for n in spec.nodes:
+        if n.group and n.group in nodes_in:
+            nodes_in[n.group].append(n)
+        else:
+            ungrouped.append(n)
+    return by_id, children, roots, nodes_in, ungrouped
 
 
 # ---- Colour resolution ------------------------------------------------------
@@ -225,14 +316,53 @@ def _layer_nodes(spec: DiagramSpec) -> dict[str, int]:
 
 def _positions(spec: DiagramSpec) -> dict[str, tuple[int, int]]:
     layers = _layer_nodes(spec)
+    by_id, _children, _roots, _nodes_in, _ung = _group_relations(spec)
+    node_by_id = {n.id: n for n in spec.nodes}
+    orig_index = {n.id: i for i, n in enumerate(spec.nodes)}
+
+    # Stable ordering for groups by first appearance so members cluster together.
+    group_order: dict[str, int] = {}
+    for g in spec.groups:
+        group_order.setdefault(g.id, len(group_order))
+
+    def _cluster_key(nid: str) -> tuple[int, ...]:
+        n = node_by_id[nid]
+        if not n.group or n.group not in by_id:
+            return (len(group_order) + 1,)  # ungrouped sinks to the bottom
+        chain, seen, cur = [], set(), n.group
+        while cur and cur in by_id and cur not in seen:
+            chain.append(cur)
+            seen.add(cur)
+            cur = by_id[cur].parent
+        chain.reverse()  # outermost group first so nested members stay adjacent
+        return tuple(group_order.get(c, 0) for c in chain)
+
+    # Reserve vertical room above the first row for nested box headers.
+    depth: dict[str, int] = {}
+
+    def _set_depth(gid: str, d: int, seen: set[str]) -> None:
+        if gid in seen:
+            return
+        seen.add(gid)
+        depth[gid] = d
+        for c in _children.get(gid, []):
+            _set_depth(c, d + 1, seen)
+
+    for r in _roots:
+        _set_depth(r, 0, set())
+    max_depth = max(depth.values(), default=-1)
+    header_room = (GROUP_PAD + GROUP_LABEL_H) * (max_depth + 1)
+
     by_layer: dict[int, list[str]] = {}
     for n in spec.nodes:
         by_layer.setdefault(layers[n.id], []).append(n.id)
     pos: dict[str, tuple[int, int]] = {}
+    y0 = MARGIN + TITLE_FONT + 30 + header_room
     for layer, ids in sorted(by_layer.items()):
+        ids.sort(key=lambda nid: (_cluster_key(nid), orig_index[nid]))
         x = MARGIN + layer * (NODE_W + H_GAP)
         for idx, nid in enumerate(ids):
-            y = MARGIN + TITLE_FONT + 30 + idx * (NODE_H + V_GAP)
+            y = y0 + idx * (NODE_H + V_GAP)
             pos[nid] = (x, y)
     return pos
 
@@ -326,6 +456,78 @@ def _arrow(eid: str, start: tuple[float, float], end: tuple[float, float], src_i
     return el
 
 
+def _node_element(eid: str, x: float, y: float, w: float, h: float, color: str, shape: str) -> dict:
+    """A coloured node. Stadium renders as an ellipse; everything else a rounded box."""
+    if shape == "stadium":
+        stroke, bg = PALETTE.get(color, PALETTE[_DEFAULT_COLOR])
+        el = _base_element(eid, "ellipse", x, y, w, h)
+        el["strokeColor"] = stroke
+        el["backgroundColor"] = bg
+        el["fillStyle"] = "solid"
+        return el
+    return _rect(eid, x, y, w, h, color)
+
+
+def _group_box_el(eid: str, x: float, y: float, w: float, h: float, color: str | None) -> dict:
+    """A transparent, colour-bordered boundary box drawn behind grouped nodes."""
+    stroke, _bg = PALETTE.get(color or _DEFAULT_COLOR, PALETTE[_DEFAULT_COLOR])
+    el = _base_element(eid, "rectangle", x, y, w, h)
+    el["strokeColor"] = stroke
+    el["backgroundColor"] = "transparent"
+    el["fillStyle"] = "solid"
+    el["strokeWidth"] = 2
+    el["roundness"] = {"type": 3}
+    return el
+
+
+def _group_boxes(
+    spec: DiagramSpec, pos: dict[str, tuple[int, int]]
+) -> tuple[dict[str, tuple[float, float, float, float]], dict[str, int], dict[str, DiagramGroup]]:
+    """Compute a bounding box per group, nested children included."""
+    by_id, children, roots, nodes_in, _ung = _group_relations(spec)
+    boxes: dict[str, tuple[float, float, float, float]] = {}
+    depth: dict[str, int] = {}
+
+    def compute(gid: str, d: int, seen: set[str]) -> tuple[float, float, float, float] | None:
+        if gid in seen:
+            return None
+        seen = seen | {gid}
+        depth[gid] = d
+        x1s: list[float] = []
+        y1s: list[float] = []
+        x2s: list[float] = []
+        y2s: list[float] = []
+        for n in nodes_in.get(gid, []):
+            if n.id not in pos:
+                continue
+            x, y = pos[n.id]
+            x1s.append(x)
+            y1s.append(y)
+            x2s.append(x + NODE_W)
+            y2s.append(y + NODE_H)
+        for c in children.get(gid, []):
+            cb = compute(c, d + 1, seen)
+            if cb:
+                bx, by, bw, bh = cb
+                x1s.append(bx)
+                y1s.append(by)
+                x2s.append(bx + bw)
+                y2s.append(by + bh)
+        if not x1s:
+            return None
+        minx = min(x1s) - GROUP_PAD
+        miny = min(y1s) - GROUP_PAD - GROUP_LABEL_H
+        maxx = max(x2s) + GROUP_PAD
+        maxy = max(y2s) + GROUP_PAD
+        box = (minx, miny, maxx - minx, maxy - miny)
+        boxes[gid] = box
+        return box
+
+    for r in roots:
+        compute(r, 0, set())
+    return boxes, depth, by_id
+
+
 def build_excalidraw(spec: DiagramSpec) -> str:
     """Render a `DiagramSpec` to a self-contained ``.excalidraw`` JSON string."""
     colors = _resolve_colors(spec)
@@ -347,12 +549,33 @@ def build_excalidraw(spec: DiagramSpec) -> str:
     )
     elements.append(title)
 
-    # Node rectangles + bound labels
+    # Group boundary boxes — outermost first so nested boxes paint on top, and
+    # before the nodes so each node sits above its box.
+    boxes, box_depth, groups_by_id = _group_boxes(spec, pos)
+    for gid in sorted(boxes, key=lambda g: box_depth.get(g, 0)):
+        bx, by, bw, bh = boxes[gid]
+        grp = groups_by_id[gid]
+        elements.append(_group_box_el(f"group-{gid}", bx, by, bw, bh, grp.color))
+        glabel = grp.label or gid
+        elements.append(
+            _text(
+                f"group-{gid}-label",
+                bx + 10,
+                by + 6,
+                max(60, len(glabel) * 9),
+                GROUP_FONT * 1.6,
+                glabel,
+                font_size=GROUP_FONT,
+                align="left",
+            )
+        )
+
+    # Node shapes + bound labels
     for n in spec.nodes:
         x, y = pos[n.id]
         rect_id = f"node-{n.id}"
         label_id = f"node-{n.id}-label"
-        rect = _rect(rect_id, x, y, NODE_W, NODE_H, colors[n.id])
+        rect = _node_element(rect_id, x, y, NODE_W, NODE_H, colors[n.id], n.shape or _DEFAULT_SHAPE)
         label = _text(
             label_id,
             x + 8,
@@ -400,9 +623,9 @@ def build_excalidraw(spec: DiagramSpec) -> str:
         else:
             elements.append(arrow)
 
-    # Attach accumulated bindings to their rectangles.
+    # Attach accumulated bindings to their node shapes (rectangles + ellipses).
     for el in elements:
-        if el["type"] == "rectangle":
+        if el["type"] in ("rectangle", "ellipse") and el["id"].startswith("node-"):
             el["boundElements"] = bound.get(el["id"], [])
 
     scene = {
@@ -427,22 +650,67 @@ def _mermaid_id(raw: str) -> str:
 
 
 def _mermaid_label(text: str) -> str:
-    return text.replace('"', "'").replace("\n", " ").strip()
+    return text.strip().replace('"', "'").replace("\r", "").replace("\n", "<br/>")
+
+
+# Mermaid wrappers per shape: (prefix, suffix) placed around a quoted label.
+_MERMAID_SHAPE_WRAP: dict[str, tuple[str, str]] = {
+    "rectangle": ('["', '"]'),
+    "rounded": ('("', '")'),
+    "stadium": ('(["', '"])'),
+    "cylinder": ('[("', '")]'),
+    "hexagon": ('{{"', '"}}'),
+}
+
+
+def _mermaid_node_decl(mid: str, node: DiagramNode) -> str:
+    """Render a single shaped node declaration, e.g. ``id(["Label"])``."""
+    pre, post = _MERMAID_SHAPE_WRAP.get(node.shape or _DEFAULT_SHAPE, _MERMAID_SHAPE_WRAP[_DEFAULT_SHAPE])
+    return f"{mid}{pre}{_mermaid_label(node.label)}{post}"
 
 
 def build_mermaid(spec: DiagramSpec) -> str:
-    """Render a `DiagramSpec` to a Mermaid ``flowchart`` string."""
+    """Render a `DiagramSpec` to a Mermaid ``flowchart`` string.
+
+    Groups become (optionally nested) ``subgraph`` blocks; nodes carry their
+    requested shape; node colours come from the shared Fluent palette.
+    """
     colors = _resolve_colors(spec)
-    lines = ["flowchart LR"]
     idmap = {n.id: _mermaid_id(n.id) for n in spec.nodes}
-    for n in spec.nodes:
-        lines.append(f'    {idmap[n.id]}["{_mermaid_label(n.label)}"]')
+    by_id, children, roots, nodes_in, ungrouped = _group_relations(spec)
+
+    lines = ["flowchart LR"]
+
+    # Ungrouped node declarations live at the top level.
+    for n in ungrouped:
+        lines.append(f"    {_mermaid_node_decl(idmap[n.id], n)}")
+
+    # Nested subgraphs carry their member node declarations.
+    def emit_group(gid: str, level: int, seen: set[str]) -> None:
+        if gid in seen:
+            return
+        seen.add(gid)
+        pad = "    " * (level + 1)
+        grp = by_id[gid]
+        lines.append(f'{pad}subgraph {_mermaid_id("g_" + gid)}["{_mermaid_label(grp.label)}"]')
+        for n in nodes_in.get(gid, []):
+            lines.append(f"{pad}    {_mermaid_node_decl(idmap[n.id], n)}")
+        for child in children.get(gid, []):
+            emit_group(child, level + 1, seen)
+        lines.append(f"{pad}end")
+
+    seen_groups: set[str] = set()
+    for r in roots:
+        emit_group(r, 0, seen_groups)
+
+    # Edges after declarations so shapes/labels are already established.
     for e in spec.edges:
         if e.label:
-            lines.append(f'    {idmap[e.source]} -->|{_mermaid_label(e.label)}| {idmap[e.target]}')
+            lines.append(f"    {idmap[e.source]} -->|{_mermaid_label(e.label)}| {idmap[e.target]}")
         else:
             lines.append(f"    {idmap[e.source]} --> {idmap[e.target]}")
-    # Colour classes
+
+    # Colour classes for nodes.
     used_colors = sorted({colors[n.id] for n in spec.nodes})
     for c in used_colors:
         fill, stroke = MERMAID_PALETTE.get(c, MERMAID_PALETTE[_DEFAULT_COLOR])
