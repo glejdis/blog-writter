@@ -6,6 +6,24 @@ Framework** (Python) and grounded in **Microsoft Learn** (Cloud Adoption
 Framework, Well-Architected, Architecture Center, AI Foundry docs) as the
 "internal best practices" source.
 
+> **New here?** Go to **[Prerequisites](#prerequisites)** → **[Quickstart](#quickstart)**
+> to get a run going in a couple of minutes (no cloud credentials needed), then
+> **[Configure](#configure)** when you want real output.
+
+## Contents
+
+- [What it does](#what-it-does)
+- [Agents](#agents) · [Pipeline](#pipeline)
+- [Prerequisites](#prerequisites)
+- [Quickstart](#quickstart)
+- [Configure](#configure)
+- [Generate a post](#run)
+- [Improve an existing draft](#improve-an-existing-draft)
+- [Chat UI](#chat-ui)
+- [Test](#test) · [Eval seeds](#eval-seeds) · [Observability](#observability)
+- [Troubleshooting](#troubleshooting)
+- [Project layout](#project-layout)
+
 ## What it does
 
 1. Takes a seed topic (e.g. *"agentic workloads on Azure landing zones"*).
@@ -35,6 +53,7 @@ Framework, Well-Architected, Architecture Center, AI Foundry docs) as the
 | Research | Broad MS Learn + Azure-Samples search via the custom Learn Browser MCP | `gpt-5.4` |
 | Planner | Outline + PoC requirements | reasoning model (`o4-mini`) |
 | PoC Builder | Generate code + run in sandbox + capture output | `gpt-5.3-codex` |
+| Diagrammer | Generate an Excalidraw + Mermaid architecture diagram per post | `gpt-5.4` |
 | Writer | Long-form prose, Learn-first citations | `claude-opus-4-7` or `gpt-5.5` |
 | Fact-Checker | Verify each claim against a source | `gpt-5-mini` |
 | Critic | Score draft vs. rubric, request revisions | `gpt-5.4` |
@@ -61,22 +80,90 @@ Seed
  → drafts/<slug>.md + samples/<slug>/ + sources.json
 ```
 
-## Install
+## Prerequisites
 
-ARM64 Windows users: this repo ships a `constraints.txt` pinning
-`cryptography==46.0.3` because newer versions don't have ARM64 wheels.
+| Tool | Version | Check |
+|---|---|---|
+| **Python** | 3.10+ (3.13 recommended) | `python --version` |
+| **[uv](https://docs.astral.sh/uv/)** | latest | `uv --version` |
+| **git** | any | `git --version` |
+
+Install **uv** (the fast Python package manager used below) if you don't have it:
 
 ```pwsh
-uv venv .venv --python 3.13
-.\.venv\Scripts\Activate.ps1
-uv pip install --prerelease=allow --constraint constraints.txt -e ".[dev]"
+winget install --id=astral-sh.uv -e                  # Windows
+# brew install uv                                    # macOS
+# curl -LsSf https://astral.sh/uv/install.sh | sh    # Linux
 ```
+
+You do **not** need any cloud credentials to try the project — it ships a
+**stub mode** that runs the whole pipeline with fake agents and no network
+calls. Real output needs an Azure AI Foundry project *or* an OpenAI / Azure
+OpenAI key (see [Configure](#configure)).
+
+> **ARM64 Windows:** the repo ships a `constraints.txt` pinning
+> `cryptography==46.0.3` because newer releases lack ARM64 wheels. The commands
+> below already apply it — keep the `--constraint` / `-c` flag.
+
+## Quickstart
+
+```pwsh
+# 1. Clone
+git clone https://github.com/glejdis/blog-writter.git
+cd blog-writter
+
+# 2. Create + activate a virtual environment
+uv venv .venv --python 3.13
+.\.venv\Scripts\Activate.ps1          # Windows PowerShell
+# source .venv/bin/activate           # macOS / Linux
+
+# 3. Install the project (editable) with dev + UI extras
+uv pip install --prerelease=allow --constraint constraints.txt -e ".[dev,ui]"
+
+# 4. Smoke-test with NO credentials and NO network (stub mode)
+blog-writer new --seed "agentic workloads on Azure landing zones" --stub
+```
+
+That last command writes a stub draft to `drafts/` and sample PoCs to
+`samples/` — proof the wiring works end-to-end. When you're ready for real
+output, head to [Configure](#configure).
+
+<details>
+<summary>Prefer plain <code>pip</code> instead of <code>uv</code>?</summary>
+
+```pwsh
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install --pre -c constraints.txt -e ".[dev,ui]"
+```
+</details>
 
 ## Configure
 
-Copy `.env.example` to `.env` and fill in (at minimum) your Azure AI Foundry
-project endpoint or an OpenAI API key. Leave everything empty to run in stub
-mode.
+For real (non-stub) runs, copy the example env file and fill in **one** model
+backend:
+
+```pwsh
+copy .env.example .env        # Windows
+# cp .env.example .env        # macOS / Linux
+```
+
+The minimum is **one** of:
+
+- **Azure AI Foundry** (preferred — hosts GPT-5.x, Claude, and reasoning
+  models): set `BLOG_WRITER_PROVIDER=foundry` and
+  `AZURE_AI_PROJECT_ENDPOINT=https://<project>.services.ai.azure.com/api/projects/<project>`.
+  Foundry uses your `az login` credentials — no API key in the file.
+- **OpenAI** (quickest for local dev): set `BLOG_WRITER_PROVIDER=openai` and
+  `OPENAI_API_KEY=sk-...`.
+- **Azure OpenAI**: set `BLOG_WRITER_PROVIDER=azure_openai` plus
+  `AZURE_OPENAI_ENDPOINT` and `AZURE_OPENAI_API_KEY`.
+
+Per-agent model deployment names and every workflow knob (revision cap, critic
+threshold, citation limits, …) are documented inline in
+[`.env.example`](.env.example) and overridable with `BLOG_WRITER_*` env vars.
+Leave the file empty to stay in stub mode.
 
 ### External search (Research agent)
 
@@ -150,7 +237,8 @@ live, answer human checkpoints in the browser, and revise the draft until
 you're happy — launch the built-in web UI:
 
 ```pwsh
-# Install the UI extras (FastAPI + websockets — pure-Python, no C deps).
+# The UI extras (FastAPI + websockets) are already installed if you ran the
+# Quickstart with ".[dev,ui]". Otherwise add them:
 uv pip install --constraint constraints.txt -e ".[ui]"
 
 # Start the server on http://127.0.0.1:8000
@@ -158,7 +246,15 @@ blog-writer ui
 
 # Or pick a different host/port
 blog-writer ui --host 0.0.0.0 --port 8080
+
+# Developing the pipeline? Auto-restart on Python file changes:
+blog-writer ui --reload
 ```
+
+> **Heads-up for contributors:** without `--reload`, uvicorn loads the Python
+> modules once at startup, so edits to pipeline/agent code won't take effect
+> until you stop and restart the server. Static assets (HTML/JS/CSS) *do*
+> refresh on a browser reload.
 
 The UI is a single-page chat app built on FastAPI + WebSockets and vanilla
 JS. The left pane has a **mode toggle**: *New post* (the brief form — topic,
@@ -208,7 +304,19 @@ exporters based on environment variables:
 
 If none are set, telemetry is silently disabled.
 
-## Layout
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `cryptography` fails to build / no wheel on **ARM64 Windows** | Make sure you passed `--constraint constraints.txt` (uv) or `-c constraints.txt` (pip) — it pins `cryptography==46.0.3`, the last version with ARM64 wheels. |
+| **UI doesn't reflect code changes** | uvicorn loads Python modules once at startup. Stop the server (Ctrl+C) and restart, or run `blog-writer ui --reload`. Static files (HTML/JS/CSS) refresh on a browser reload. |
+| `408 Timeout` / `429` / `5xx` from the model mid-run | These transient errors are retried automatically with exponential backoff. A persistent failure usually means the Foundry / OpenAI endpoint is throttling or out of capacity — check your quota. |
+| `blog-writer: command not found` | Activate the virtual environment first (`.\.venv\Scripts\Activate.ps1`), or run via `python -m blog_writer.cli`. |
+| `UI dependencies are missing` | Install the UI extras: `uv pip install -e ".[ui]"`. |
+| Garbled symbols in the console on **legacy Windows** | The CLI forces UTF-8 output; if your terminal still mangles glyphs, use Windows Terminal or run `chcp 65001`. |
+| Want to run with no cloud/API setup | Add `--stub` to any command, or set `BLOG_WRITER_STUB=true`. |
+
+## Project layout
 
 ```
 src/blog_writer/
