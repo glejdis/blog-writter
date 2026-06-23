@@ -1105,3 +1105,315 @@ def _summarise_internal_gap(state: BlogState) -> str:
         )
     titles = "; ".join(c.title for c in state.internal_hits[:5])
     return f"Learn already covers: {titles}. Find external sources that add specifics or recency."
+
+
+# =============================================================================
+# Improve — enhance an existing draft (find sources, recommend, re-cite)
+# =============================================================================
+
+_H1_HEADING = re.compile(r"^#\s+(.+?)\s*$", re.MULTILINE)
+_H2_HEADING = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
+
+# Headings that don't describe the topic — skip them when building queries.
+_BOILERPLATE_HEADINGS = {
+    "sources",
+    "references",
+    "try it yourself",
+    "architecture at a glance",
+}
+
+
+def _draft_title(draft: str) -> str:
+    """The first H1 of a Markdown draft, or '' if there isn't one."""
+    match = _H1_HEADING.search(draft or "")
+    return match.group(1).strip() if match else ""
+
+
+def _draft_queries(draft: str, *, max_queries: int = 6) -> list[str]:
+    """Search queries derived from the draft: the title, then title+heading pairs.
+
+    Used to find sources keyed off the draft's *own* subject matter rather than a
+    seed topic. Boilerplate headings (Sources, etc.) are skipped.
+    """
+    title = _draft_title(draft)
+    headings = [
+        h.strip()
+        for h in _H2_HEADING.findall(draft or "")
+        if h.strip().lower() not in _BOILERPLATE_HEADINGS
+        and not h.strip().lower().startswith("what ")
+    ]
+    queries: list[str] = []
+    if title:
+        queries.append(title)
+    for heading in headings:
+        queries.append(f"{title} {heading}".strip() if title else heading)
+
+    seen: set[str] = set()
+    out: list[str] = []
+    for q in queries:
+        key = q.lower()
+        if q and key not in seen:
+            seen.add(key)
+            out.append(q)
+        if len(out) >= max_queries:
+            break
+    return out or [title or "Azure"]
+
+
+async def _gather_learn_for_draft(
+    state: BlogState, *, config: AppConfig, max_hits: int
+) -> None:
+    """Multi-query MS Learn search keyed off the draft; scope-filter + dedupe."""
+    scope = load_learn_scopes(config)
+    collected: list[Citation] = []
+    seen: set[str] = set()
+    for query in _draft_queries(state.draft or ""):
+        if config.stub:
+            raw_hits = await search_learn_stub(query)
+        else:
+            raw_hits = await search_learn(query, url=config.ms_learn_mcp_url)
+            if not raw_hits:
+                raw_hits = await search_learn_stub(query)
+        for hit in scope.filter_hits(raw_hits):
+            if hit.url in seen:
+                continue
+            seen.add(hit.url)
+            collected.append(
+                Citation(
+                    key=f"L{len(collected) + 1}",
+                    kind="learn",
+                    title=hit.title,
+                    url=hit.url,
+                    summary=hit.excerpt,
+                )
+            )
+            if len(collected) >= max_hits:
+                break
+        if len(collected) >= max_hits:
+            break
+    state.internal_hits = collected
+
+
+async def _gather_external_for_draft(
+    state: BlogState, *, config: AppConfig, max_hits: int
+) -> None:
+    """Find external sources for the draft via deep research (or web search)."""
+    title = _draft_title(state.draft or "")
+    topic = state.seed or title or (state.angle or "")
+    if config.stub:
+        hits = await bing_search_stub(topic)
+    elif config.deep_research:
+        areas = "; ".join(_draft_queries(state.draft or "")[1:]) or topic
+        query = (
+            "Find authoritative, up-to-date sources (Microsoft Learn first) to "
+            f"support and fact-check a technical blog post titled '{title}'. "
+            f"Key areas to verify: {areas}."
+        )
+        report, hits = await deep_research(query)
+        if report:
+            state.research_report = report
+        if not hits:
+            hits = await search_web(topic) or await bing_search_stub(topic)
+    else:
+        hits = await search_web(topic)
+        if not hits:
+            hits = await bing_search_stub(topic)
+
+    learn_urls = {c.url for c in state.internal_hits}
+    collected: list[Citation] = []
+    seen: set[str] = set()
+    for hit in hits:
+        url = hit.get("url", "")
+        if not url or url in seen or url in learn_urls:
+            continue
+        seen.add(url)
+        collected.append(
+            Citation(
+                key=f"E{len(collected) + 1}",
+                kind="external",
+                title=hit.get("title", url),
+                url=url,
+                summary=hit.get("snippet", ""),
+            )
+        )
+        if len(collected) >= max_hits:
+            break
+    state.external_hits = collected
+
+
+def _improve_writer_inputs(state: BlogState) -> str:
+    findings = (
+        "\n".join(
+            f"- [{f.status}] {f.section}: {f.claim}"
+            + (f" (suggestion: {f.suggestion})" if f.suggestion else "")
+            for f in state.fact_findings
+        )
+        or "(none)"
+    )
+    recs = (
+        "\n".join(f"- {item}" for item in state.latest_critic.feedback)
+        if state.latest_critic and state.latest_critic.feedback
+        else "(none)"
+    )
+    report_block = ""
+    if state.research_report.strip():
+        report_block = (
+            "\n\nDeep-research briefing (synthesized, Bing-grounded — cite via the "
+            "external [E#] sources):\n" + state.research_report.strip()
+        )
+    return (
+        "You are improving an EXISTING draft, not writing a new one. Preserve the "
+        "author's structure, voice, headings, and any code or mermaid blocks. Make "
+        "targeted improvements: tighten prose, fix issues raised below, and — most "
+        "importantly — weave in citations from the sources below as footnotes "
+        "([^L#] for Microsoft Learn first, [^E#] for external), then build or "
+        "extend the `## Sources` section to list them. Only cite the sources "
+        "provided; never invent a source or URL. Return the COMPLETE improved "
+        "Markdown document.\n\n"
+        f"Sources (use Learn first):\n{_citations_yaml(state)}\n\n"
+        f"Fact-check findings to address:\n{findings}\n\n"
+        f"Reviewer recommendations to address:\n{recs}"
+        + report_block
+        + f"\n\nExisting draft:\n{state.draft or ''}"
+    )
+
+
+def build_review_report(state: BlogState) -> str:
+    """A human-readable Markdown review: recommendations, fact-check, sources."""
+    title = _draft_title(state.draft or "") or state.angle or state.seed
+    crit = state.latest_critic
+    lines = [f"# Review — {title}", ""]
+    if crit:
+        lines += [f"**Critic score:** {crit.total} → {crit.verdict}", ""]
+        if crit.scores:
+            lines.append("**Scores by criterion:**")
+            lines += [f"- {k}: {v}" for k, v in crit.scores.items()]
+            lines.append("")
+    lines += ["## Recommended improvements", ""]
+    lines += [f"- {f}" for f in (crit.feedback if crit else [])] or ["- (none)"]
+    lines += ["", "## Fact-check findings", ""]
+    if state.fact_findings:
+        for f in state.fact_findings:
+            sug = f" — _{f.suggestion}_" if f.suggestion else ""
+            lines.append(f"- **[{f.status}]** {f.section}: {f.claim}{sug}")
+    else:
+        lines.append("- (none)")
+    lines += ["", "## Sources found", "", "### Microsoft Learn", ""]
+    lines += (
+        [f"- [{c.title}]({c.url})" for c in state.internal_hits]
+        if state.internal_hits
+        else ["- (none)"]
+    )
+    lines += ["", "### External", ""]
+    lines += (
+        [f"- [{c.title}]({c.url})" for c in state.external_hits]
+        if state.external_hits
+        else ["- (none)"]
+    )
+    if state.research_report.strip():
+        lines += ["", "## Deep-research briefing", "", state.research_report.strip()]
+    return "\n".join(lines) + "\n"
+
+
+async def improve_blog_post(
+    draft: str,
+    *,
+    config: AppConfig,
+    models: ModelMap | None = None,
+    topic: str | None = None,
+    on_event: EventCallback | None = None,
+    progress: Callable[[str], None] | None = None,
+    rewrite: bool = True,
+    run_fact_check: bool = True,
+) -> BlogState:
+    """Improve an existing draft: find sources, recommend changes, re-cite.
+
+    Unlike :func:`run_blog_pipeline` (seed → new post), this takes a finished
+    draft and:
+
+    1. Finds Microsoft Learn + external/deep-research sources keyed off the
+       draft's *own* title and section headings.
+    2. Fact-checks and critiques the draft against those sources.
+    3. (When ``rewrite``) re-runs the Writer to weave in Learn-first footnote
+       citations and address the recommendations, preserving the author's
+       structure and voice.
+
+    Returns the updated state; the caller persists it. ``state.latest_critic``
+    holds the recommendations and :func:`build_review_report` renders them.
+    """
+    if not draft or not draft.strip():
+        raise ValueError("improve_blog_post: draft is empty.")
+
+    models = models or load_model_map()
+    title = _draft_title(draft)
+    state = BlogState(seed=topic or title or "untitled draft")
+    state.draft = draft
+    state.angle = title or state.seed
+    _log = progress or (lambda _msg: None)
+    emit = _make_emit(on_event)
+
+    def log_and_emit(msg: str) -> None:
+        _log(msg)
+        emit("log", message=msg)
+
+    # 1. Internal knowledge — MS Learn, keyed off the draft.
+    emit("stage_start", stage="internal_knowledge", label="MS Learn (curated scope)")
+    log_and_emit("Finding Microsoft Learn sources for the draft…")
+    await _gather_learn_for_draft(
+        state, config=config, max_hits=max(config.max_learn_hits, 8)
+    )
+    log_and_emit(f"Found {len(state.internal_hits)} in-scope Learn sources.")
+    emit("citations", kind="internal", items=[_citation_to_dict(c) for c in state.internal_hits])
+    emit("stage_end", stage="internal_knowledge")
+
+    # 2. External / deep research.
+    label = "Deep research (Bing-grounded)" if config.deep_research else "External research"
+    emit("stage_start", stage="research", label=label)
+    log_and_emit(f"{label}…")
+    await _gather_external_for_draft(state, config=config, max_hits=config.max_learn_hits)
+    log_and_emit(f"Found {len(state.external_hits)} external sources.")
+    emit("citations", kind="external", items=[_citation_to_dict(c) for c in state.external_hits])
+    emit("stage_end", stage="research")
+
+    # 3. Fact-check the existing draft against the new sources.
+    if run_fact_check:
+        emit("stage_start", stage="fact_checker", label="Fact-checking")
+        log_and_emit("Fact-checking the draft against the sources…")
+        state = await _fact_check(state, config=config, models=models)
+        emit(
+            "fact_findings",
+            items=[
+                {"section": f.section, "status": f.status, "claim": f.claim}
+                for f in state.fact_findings
+            ],
+        )
+        emit("stage_end", stage="fact_checker")
+
+    # 4. Critic → improvement recommendations.
+    emit("stage_start", stage="critic", label="Reviewing")
+    log_and_emit("Generating improvement recommendations…")
+    verdict = await _critic_pass(state, config=config, models=models)
+    state.critic_verdicts.append(verdict)
+    emit(
+        "critic",
+        round=len(state.critic_verdicts),
+        total=verdict.total,
+        verdict=verdict.verdict,
+        feedback=list(verdict.feedback),
+    )
+    emit("recommendations", items=list(verdict.feedback), total=verdict.total)
+    emit("stage_end", stage="critic")
+
+    # 5. Rewrite the draft with citations woven in.
+    if rewrite:
+        emit("stage_start", stage="writer", label="Improving draft")
+        log_and_emit("Rewriting the draft with citations…")
+        agent = build_writer_agent(config, models)
+        response = await _run_agent(agent, _improve_writer_inputs(state))
+        state.draft = _text_of(response)
+        state.iteration += 1
+        emit("draft", markdown=state.draft or "", iteration=state.iteration)
+        emit("stage_end", stage="writer")
+
+    emit("done", final_verdict="improved")
+    return state

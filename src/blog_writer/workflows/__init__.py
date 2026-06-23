@@ -1,6 +1,11 @@
 """Orchestration — the multi-agent blog pipeline."""
 
-from blog_writer.workflows.blog_pipeline import run_blog_pipeline
+from blog_writer.workflows.blog_pipeline import (
+    build_review_report,
+    improve_blog_post,
+    revise_blog_post,
+    run_blog_pipeline,
+)
 from blog_writer.workflows.state import (
     BlogState,
     Citation,
@@ -21,5 +26,8 @@ __all__ = [
     "PoCResult",
     "PoCSpec",
     "Section",
+    "build_review_report",
+    "improve_blog_post",
+    "revise_blog_post",
     "run_blog_pipeline",
 ]

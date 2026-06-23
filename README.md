@@ -109,6 +109,39 @@ blog-writer new --seed "AI gateway patterns on Azure" --autonomous
 blog-writer new --seed "anything" --stub
 ```
 
+## Improve an existing draft
+
+Already have a draft? Point `blog-writer improve` at it. Instead of writing a new
+post from a seed, it reads the file, finds sources keyed off the draft's **own
+title and section headings** (curated MS Learn first, then external/deep
+research), fact-checks and critiques it, and rewrites it to weave in Learn-first
+footnote citations — preserving your structure and voice.
+
+```pwsh
+# Find sources, recommend improvements, and rewrite with citations.
+blog-writer improve drafts/landing-zone-to-secure-ai-part-1.md
+
+# Use the Foundry o3-deep-research model for source finding.
+blog-writer improve drafts/my-post.md --deep-research
+
+# Just the recommendations + sources — don't touch the prose.
+blog-writer improve drafts/my-post.md --recommend-only
+
+# Verify the wiring without model calls.
+blog-writer improve drafts/my-post.md --stub
+```
+
+Outputs land next to the input draft:
+
+| File | Contents |
+|---|---|
+| `<draft>.improved.md` | The rewritten draft with citations (skipped with `--recommend-only`) |
+| `<draft>.review.md` | Critic score, recommended improvements, fact-check findings, ranked sources |
+| `<draft>.sources.json` | Citations + recommendations + fact-check findings (machine-readable) |
+
+Use `--output/-o` to choose where the improved draft is written, and `--topic`
+to override the search subject (default: derived from the draft).
+
 ## Chat UI
 
 For an interactive experience — fill in a brief, watch each agent's progress
