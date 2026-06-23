@@ -87,6 +87,11 @@ body {
   font-weight: normal;
   font-size: 0.78rem;
 }
+.reference-status {
+  display: block;
+  margin-top: 0.35rem;
+  color: var(--accent, #0b66c3);
+}
 .status {
   display: flex;
   gap: 0.45rem;

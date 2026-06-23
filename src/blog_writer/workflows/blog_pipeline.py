@@ -22,6 +22,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from agent_framework import Agent
+from pydantic import BaseModel, Field
 
 from blog_writer.agents import (
     build_critic_agent,
@@ -114,6 +115,7 @@ async def run_blog_pipeline(
     on_event: EventCallback | None = None,
     extra_instructions: str | None = None,
     suggested_toc: str | None = None,
+    reference_draft: str | None = None,
 ) -> BlogState:
     """Run the full pipeline and return the final state.
 
@@ -121,11 +123,16 @@ async def run_blog_pipeline(
     steering knobs surfaced by the UI. They are appended to the Planner's
     input so the user can pre-seed a table of contents or impose
     constraints (tone, length, audience, etc.) without modifying prompts.
+
+    ``reference_draft`` is an optional existing Markdown draft the user
+    uploaded. It is surfaced to the Planner, Writer, and Critic so the agents
+    can mine it for ideas, reuse what works, and challenge what doesn't.
     """
     models = models or load_model_map()
     state = BlogState(seed=seed)
     state.extra_instructions = extra_instructions or ""
     state.suggested_toc = suggested_toc or ""
+    state.reference_draft = reference_draft or ""
     _log = progress or (lambda _msg: None)
     emit = _make_emit(on_event)
 
@@ -492,12 +499,26 @@ async def _external_research(
 
 async def _plan(state: BlogState, *, config: AppConfig, models: ModelMap) -> BlogState:
     agent = build_planner_agent(config, models)
-    response = await _run_agent(
-        agent,
-        _planner_inputs(state),
-    )
-    text = _text_of(response)
-    state.outline = _parse_outline(text, fallback_title=state.angle or state.seed)
+    prompt = _planner_inputs(state)
+    outline: Outline | None = None
+    # Prefer structured output — the model frequently emits headings with
+    # embedded colons (e.g. "Core Concepts: ...") which make free-form YAML
+    # parse to an empty outline. A schema-constrained response avoids that.
+    if not config.stub:
+        try:
+            result = await agent.run(prompt, options={"response_format": _PlannerOutput})
+            parsed = getattr(result, "value", None)
+            if isinstance(parsed, _PlannerOutput) and parsed.sections:
+                outline = _outline_from_model(
+                    parsed, fallback_title=state.angle or state.seed
+                )
+        except Exception:
+            outline = None
+    if outline is None:
+        response = await _run_agent(agent, prompt)
+        text = _text_of(response)
+        outline = _parse_outline(text, fallback_title=state.angle or state.seed)
+    state.outline = outline
     return state
 
 
@@ -786,6 +807,11 @@ async def _critic_pass(
             + "\n".join(
                 f"- [{f.status}] {f.section}: {f.claim}" for f in state.fact_findings
             )
+            + _reference_block(
+                state,
+                "Use it as a benchmark: if our draft is weaker than this reference on "
+                "any dimension, call that out and challenge it specifically.",
+            )
         ),
     )
     text = _text_of(response)
@@ -895,6 +921,27 @@ def _parse_citations(text: str, *, kind: str, prefix: str) -> list[Citation]:
     return citations
 
 
+def _reference_block(state: BlogState, guidance: str) -> str:
+    """Render the user's uploaded reference draft for an agent prompt.
+
+    Returns an empty string when no reference draft was provided. ``guidance``
+    tells the specific agent how to use it (consider vs. challenge).
+    """
+    text = (state.reference_draft or "").strip()
+    if not text:
+        return ""
+    # Cap the size so a huge upload can't blow the context window.
+    excerpt = text[:8000]
+    if len(text) > 8000:
+        excerpt += "\n\n…(reference draft truncated)…"
+    return (
+        "\n\nReference draft supplied by the user (an existing post on a related "
+        "topic). " + guidance + "\n--- BEGIN REFERENCE DRAFT ---\n"
+        + excerpt
+        + "\n--- END REFERENCE DRAFT ---"
+    )
+
+
 def _planner_inputs(state: BlogState) -> str:
     extras: list[str] = []
     if state.suggested_toc.strip():
@@ -919,6 +966,11 @@ def _planner_inputs(state: BlogState) -> str:
         + _citations_yaml(state, only="external")
         + report_block
         + extras_block
+        + _reference_block(
+            state,
+            "Use it to shape the outline: keep the angles that work, fix the gaps, "
+            "and don't simply reproduce its structure.",
+        )
         + "\n\nReturn the YAML outline + PoC list as specified."
     )
 
@@ -956,6 +1008,11 @@ def _writer_inputs(state: BlogState) -> str:
         + report_block
         + diagram_block
         + extras
+        + _reference_block(
+            state,
+            "Treat it as raw material, not a template: borrow strong phrasing or "
+            "examples, but improve on its arguments and avoid copying it wholesale.",
+        )
         + "\n\nWrite the full Markdown draft now."
     )
 
@@ -991,6 +1048,51 @@ def _outline_summary(state: BlogState) -> str:
     return "\n".join(lines)
 
 
+class _PlannerSection(BaseModel):
+    heading: str = ""
+    argues: str = ""
+    leans_on: list[str] = Field(default_factory=list)
+
+
+class _PlannerPoC(BaseModel):
+    id: str = "poc"
+    section: str = ""
+    description: str = ""
+    language: str = "python"
+    sandbox: str = "local"
+
+
+class _PlannerOutput(BaseModel):
+    """Schema for the Planner's structured (response_format) output."""
+
+    title: str = ""
+    summary: str = ""
+    sections: list[_PlannerSection] = Field(default_factory=list)
+    pocs: list[_PlannerPoC] = Field(default_factory=list)
+
+
+def _outline_from_model(parsed: _PlannerOutput, *, fallback_title: str) -> Outline:
+    return Outline(
+        title=parsed.title or fallback_title,
+        summary=parsed.summary or "",
+        sections=[
+            Section(heading=s.heading, argues=s.argues, leans_on=list(s.leans_on))
+            for s in parsed.sections
+            if s.heading
+        ],
+        pocs=[
+            PoCSpec(
+                id=p.id,
+                section=p.section,
+                description=p.description,
+                language=p.language,
+                sandbox=p.sandbox,  # type: ignore[arg-type]
+            )
+            for p in parsed.pocs
+        ],
+    )
+
+
 def _parse_outline(text: str, *, fallback_title: str) -> Outline:
     """Parse the Planner's YAML output into an `Outline`.
 
@@ -1000,7 +1102,10 @@ def _parse_outline(text: str, *, fallback_title: str) -> Outline:
     try:
         import yaml
 
-        data = yaml.safe_load(text)
+        # Models frequently wrap the YAML in a ```yaml ... ``` fence even when
+        # asked not to; that breaks yaml.safe_load. Strip the fence first.
+        payload = _extract_first_code_block(text) or text
+        data = yaml.safe_load(payload)
         if isinstance(data, dict):
             sections = [
                 Section(

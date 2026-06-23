@@ -10,11 +10,14 @@
   const draftEl = $("draft");
   const draftIter = $("draft-iter");
   const downloadBtn = $("download-btn");
+  const downloadPdfBtn = $("download-pdf-btn");
   const acceptBtn = $("accept-btn");
   const reviseForm = $("revise-form");
   const reviseInput = $("revise-input");
   const briefForm = $("brief-form");
   const startBtn = $("start-btn");
+  const referenceFile = $("reference-file");
+  const referenceStatus = $("reference-status");
   const copyBtn = $("copy-btn");
   const newBtn = $("new-btn");
   const progressFill = $("progress-fill");
@@ -80,28 +83,58 @@
   let improveMode = false;
   let currentExcalidraw = null;
   let currentDiagramTitle = "architecture";
+  let referenceDraft = "";
 
   // -------------------------------------------------------------------------
-  // WebSocket plumbing
+  // WebSocket plumbing (with automatic reconnect)
   // -------------------------------------------------------------------------
+
+  let reconnectAttempts = 0;
+  let reconnectTimer = null;
+  let manualClose = false;
+
+  function scheduleReconnect() {
+    if (manualClose || reconnectTimer) return;
+    // Exponential backoff capped at 10s: 0.5, 1, 2, 4, 8, 10, 10…
+    const delay = Math.min(500 * 2 ** reconnectAttempts, 10000);
+    reconnectAttempts += 1;
+    statusText.textContent = `reconnecting… (try ${reconnectAttempts})`;
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      connect();
+    }, delay);
+  }
 
   function connect() {
     const proto = location.protocol === "https:" ? "wss" : "ws";
     ws = new WebSocket(`${proto}://${location.host}/ws`);
 
     ws.onopen = () => {
+      reconnectAttempts = 0;
+      statusDot.classList.remove("err");
       statusDot.classList.add("ok");
       statusText.textContent = "connected";
     };
     ws.onclose = () => {
       statusDot.classList.remove("ok");
       statusDot.classList.add("err");
-      statusText.textContent = "disconnected — reload";
       setBusy(false);
+      if (manualClose) {
+        statusText.textContent = "disconnected";
+        return;
+      }
+      // A running pipeline is bound to the old socket/session and cannot be
+      // resumed, so surface that the run was interrupted.
+      if (pipelineRunning) {
+        pipelineRunning = false;
+        addSystem("Connection dropped — the in-progress run was interrupted. Reconnecting…");
+      }
+      scheduleReconnect();
     };
     ws.onerror = () => {
       statusDot.classList.add("err");
-      statusText.textContent = "error";
+      // Let onclose drive the reconnect; just reflect the error state.
+      if (!reconnectTimer) statusText.textContent = "connection error";
     };
     ws.onmessage = (ev) => {
       let msg;
@@ -222,6 +255,7 @@
       case "revision_persisted":
         if (msg.draft_path) downloadPath = msg.draft_path;
         downloadBtn.disabled = !currentDraft;
+        downloadPdfBtn.disabled = !currentDraft;
         break;
       case "improve_persisted":
         if (msg.improved_path) {
@@ -242,6 +276,7 @@
         progressFill.style.width = "100%";
         const hasDraft = !!currentDraft;
         downloadBtn.disabled = !hasDraft;
+        downloadPdfBtn.disabled = !hasDraft;
         copyBtn.disabled = !hasDraft;
         acceptBtn.disabled = !hasDraft;
         newBtn.hidden = false;
@@ -425,6 +460,7 @@
       draftEl.textContent = currentDraft;
     }
     downloadBtn.disabled = false;
+    downloadPdfBtn.disabled = false;
     copyBtn.disabled = false;
   }
 
@@ -494,6 +530,7 @@
       instructions: $("instructions").value.trim() || null,
       autonomous: $("autonomous").checked,
       stub: $("stub").checked,
+      reference_draft: referenceDraft || null,
     });
   });
 
@@ -543,6 +580,35 @@
     });
   }
 
+  if (referenceFile) {
+    referenceFile.addEventListener("change", async () => {
+      const file = referenceFile.files && referenceFile.files[0];
+      if (!file) {
+        referenceDraft = "";
+        referenceStatus.classList.add("hidden");
+        return;
+      }
+      const MAX_BYTES = 1_000_000; // 1 MB guard
+      if (file.size > MAX_BYTES) {
+        referenceDraft = "";
+        referenceFile.value = "";
+        referenceStatus.textContent = "File too large (max 1 MB).";
+        referenceStatus.classList.remove("hidden");
+        return;
+      }
+      try {
+        referenceDraft = await file.text();
+        const kb = Math.max(1, Math.round(file.size / 1024));
+        referenceStatus.textContent = `Loaded ${file.name} (${kb} KB) — agents will consider & challenge it.`;
+        referenceStatus.classList.remove("hidden");
+      } catch (err) {
+        referenceDraft = "";
+        referenceStatus.textContent = "Couldn't read that file.";
+        referenceStatus.classList.remove("hidden");
+      }
+    });
+  }
+
   reviseForm.addEventListener("submit", (e) => {
     e.preventDefault();
     const instruction = reviseInput.value.trim();
@@ -566,6 +632,41 @@
     a.download = `${slug}.md`;
     a.click();
     URL.revokeObjectURL(url);
+  });
+
+  downloadPdfBtn.addEventListener("click", () => {
+    if (!currentDraft) return;
+    const title = currentTitle || "Blog post";
+    // Render the markdown to HTML (reuse marked if available) and open a clean
+    // print window. The browser's "Save as PDF" destination produces the file.
+    const body = window.marked
+      ? window.marked.parse(currentDraft)
+      : `<pre>${currentDraft.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]))}</pre>`;
+    const win = window.open("", "_blank");
+    if (!win) {
+      addSystem("Pop-up blocked — allow pop-ups to export PDF.");
+      return;
+    }
+    win.document.write(
+      `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title>` +
+        `<style>` +
+        `body{font:16px/1.65 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;` +
+        `max-width:46rem;margin:2.5rem auto;padding:0 1.25rem;color:#1a1a1a;}` +
+        `h1,h2,h3{line-height:1.25;margin:1.6em 0 .5em;}` +
+        `pre{background:#f4f4f5;padding:.9em 1em;border-radius:6px;overflow:auto;` +
+        `font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}` +
+        `code{font:0.9em ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}` +
+        `pre code{font-size:inherit;}` +
+        `a{color:#0b66c3;}img{max-width:100%;}` +
+        `blockquote{margin:1em 0;padding-left:1em;border-left:3px solid #ddd;color:#555;}` +
+        `table{border-collapse:collapse;}th,td{border:1px solid #ccc;padding:.4em .6em;}` +
+        `@page{margin:1.6cm;}` +
+        `</style></head><body>${body}</body></html>`,
+    );
+    win.document.close();
+    // Wait for layout/fonts before invoking the print dialog.
+    win.focus();
+    setTimeout(() => win.print(), 350);
   });
 
   acceptBtn.addEventListener("click", () => {
@@ -604,6 +705,12 @@
     for (const li of stageNodes.values()) li.classList.remove("running", "done", "err");
     addSystem("Started a new post. Fill in the brief on the left.");
     $("topic").focus();
+  });
+
+  // Don't try to reconnect once the page is actually navigating away.
+  window.addEventListener("beforeunload", () => {
+    manualClose = true;
+    if (ws) ws.close();
   });
 
   connect();

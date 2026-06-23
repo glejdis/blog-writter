@@ -85,6 +85,12 @@
                 placeholder="e.g. tone, length, audience, sections to avoid…"
               ></textarea>
             </label>
+            <label>
+              Reference draft (.md)
+              <input id="reference-file" type="file" accept=".md,.markdown,.txt,text/markdown,text/plain" />
+              <span id="reference-status" class="muted reference-status hidden"></span>
+              <small class="muted">An existing post the agents will consider and challenge while planning, writing, and critiquing.</small>
+            </label>
             <div class="row">
               <label class="check">
                 <input type="checkbox" id="autonomous" /> Autonomous (skip my approvals)
@@ -176,6 +182,7 @@
             <div class="draft-actions">
               <button id="copy-btn" class="ghost small" type="button" disabled>Copy</button>
               <button id="download-btn" class="ghost small" type="button" disabled>Download .md</button>
+              <button id="download-pdf-btn" class="ghost small" type="button" disabled>Download .pdf</button>
               <button id="accept-btn" class="small" type="button" disabled>Accept draft</button>
             </div>
           </div>

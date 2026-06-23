@@ -1,8 +1,6 @@
 # From Azure Landing Zone to Secure AI: A Practical Guide to Enterprise Agentic Deployment (Part 1)
 
-Every week, some organization announces an AI initiative. A stakeholder wants an
-internal assistant. A product team wants an agent that can read tickets and draft
-replies. A knowledge team wants to turn ten thousand documents into answers.
+Every week, organizations announce new AI initiatives. A business stakeholder wants an internal chatbot. A product team wants a customer assistant. A knowledge management team wants to unlock information hidden across thousands of documents.
 
 The first question is almost always *"which model should we use?"*
 
@@ -24,7 +22,7 @@ To keep it concrete, two people carry the story.
 | Persona | Team | Owns |
 | --- | --- | --- |
 | **Maya** | Platform engineering | Landing zone, networking, identity, governance |
-| **Sam** | AI engineering | The agent: tools, orchestration, model, evaluation |
+| **Sam** | AI engineering | The agent: tools, orchestration, model, evaluation, RAG pipeline |
 
 They meet in the middle. Neither succeeds alone — and the thing that connects
 them is a single handoff: a **managed identity** and a set of **private

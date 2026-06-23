@@ -5,7 +5,7 @@ Wire protocol — JSON messages on the WebSocket
 
 **Client → server**
 
-* ``{type: "start", topic, toc?, instructions?, autonomous?, stub?}``
+* ``{type: "start", topic, toc?, instructions?, autonomous?, stub?, reference_draft?}``
 * ``{type: "improve", draft?, path?, topic?, deep_research?, recommend_only?, stub?}``
 * ``{type: "answer", value}``      — user picked an option / typed a free-form answer
 * ``{type: "revise", instruction}``— after the first draft is ready, ask for changes
@@ -183,6 +183,7 @@ async def _run_pipeline_in_session(
     instructions: str | None,
     autonomous: bool,
     stub: bool,
+    reference_draft: str | None = None,
 ) -> None:
     """Drive the pipeline for one user 'start' request."""
     config = load_config(stub=stub)
@@ -209,6 +210,7 @@ async def _run_pipeline_in_session(
             on_event=on_event,
             extra_instructions=instructions,
             suggested_toc=toc,
+            reference_draft=reference_draft,
         )
         session.state = state
         draft_path, sources_path = await _persist_draft(state)
@@ -391,6 +393,7 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                         instructions=(msg.get("instructions") or None),
                         autonomous=bool(msg.get("autonomous")),
                         stub=bool(msg.get("stub")),
+                        reference_draft=(msg.get("reference_draft") or None),
                     )
                 )
 

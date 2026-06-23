@@ -95,6 +95,9 @@ class BlogState:
     # Optional user-provided steering from the UI
     extra_instructions: str = ""
     suggested_toc: str = ""
+    # An existing draft (Markdown) the user uploaded for the agents to take
+    # into consideration and challenge while planning, writing, and critiquing.
+    reference_draft: str = ""
 
     # After ideation + human pick
     angles: list[str] = field(default_factory=list)
