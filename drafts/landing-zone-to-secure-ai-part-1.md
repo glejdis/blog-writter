@@ -251,23 +251,23 @@ flowchart LR
         AGW[App Gateway + WAF]
     end
 
+    subgraph Spoke["AI Spoke VNet"]
+        App[Chat UI / App Service]
+        subgraph Agent["Foundry Agent Service — delegated subnet, no public egress"]
+            AG[Prompt / Hosted Agent]
+        end
+        subgraph PE["Private Endpoints (Azure Private Link)"]
+            AOAI[Foundry account<br/>models]
+            Search[Azure AI Search]
+            Cosmos[(Cosmos DB<br/>agent state)]
+            Storage[(Storage)]
+            KV[Key Vault]
+        end
+    end
+
     subgraph Hub["Hub VNet"]
         FW[Azure Firewall<br/>FQDN egress rules]
         DNS[(Private DNS Zones)]
-    end
-
-    subgraph Spoke["AI Spoke VNet"]
-        App[Chat UI / App Service]
-        subgraph Agent["Foundry Agent Service<br/>(delegated subnet, no public egress)"]
-            AG[Prompt / Hosted Agent]
-        end
-        subgraph PE["Private Endpoints"]
-            AOAI[Foundry account<br/>models]
-            Search[Azure AI Search]
-            Storage[(Storage)]
-            Cosmos[(Cosmos DB<br/>agent state)]
-            KV[Key Vault]
-        end
     end
 
     Internet([Approved External APIs / MCP])
@@ -275,16 +275,24 @@ flowchart LR
     User -->|HTTPS| AGW --> App
     App -->|Managed Identity, private endpoint| AG
     AG -->|Managed Identity| AOAI
-    AG -->|Managed Identity| Search
-    AG -->|Managed Identity| Cosmos
+    AG --> Search
+    AG --> Cosmos
     AG --> Storage
     AG -->|tool calls inspected| FW --> Internet
     PE -. private resolution .-> DNS
 
-    classDef secure fill:#0b6,stroke:#063,color:#fff;
-    classDef net fill:#36c,stroke:#024,color:#fff;
-    class AOAI,Search,Storage,Cosmos,KV secure;
-    class FW,DNS,App,AGW net;
+    %% Fluent UI palette — matches the editable Excalidraw companion
+    classDef net fill:#CFE4FA,stroke:#0078D4,color:#000;
+    classDef agent fill:#E8DAEF,stroke:#5C2D91,color:#000;
+    classDef data fill:#DFF6DD,stroke:#107C10,color:#000;
+    classDef fw fill:#FFF4CE,stroke:#F7630C,color:#000;
+    classDef ext fill:#F3F2F1,stroke:#495057,color:#000;
+
+    class AGW,App,DNS net;
+    class AG agent;
+    class AOAI,Search,Cosmos,Storage,KV data;
+    class FW fw;
+    class User,Internet ext;
 ```
 
 ## Try it yourself
