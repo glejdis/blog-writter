@@ -16,7 +16,10 @@ once we need checkpointing / visualization / parallel sub-graphs.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
+import random
 import re
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -56,6 +59,8 @@ from blog_writer.workflows.state import (
     PoCSpec,
     Section,
 )
+
+logger = logging.getLogger(__name__)
 
 # -----------------------------------------------------------------------------
 # Public entry point
@@ -506,7 +511,10 @@ async def _plan(state: BlogState, *, config: AppConfig, models: ModelMap) -> Blo
     # parse to an empty outline. A schema-constrained response avoids that.
     if not config.stub:
         try:
-            result = await agent.run(prompt, options={"response_format": _PlannerOutput})
+            result = await _run_with_retries(
+                lambda: agent.run(prompt, options={"response_format": _PlannerOutput}),
+                what="planner",
+            )
             parsed = getattr(result, "value", None)
             if isinstance(parsed, _PlannerOutput) and parsed.sections:
                 outline = _outline_from_model(
@@ -845,9 +853,88 @@ async def _final_review(state: BlogState, *, config: AppConfig, models: ModelMap
 # =============================================================================
 
 
+# HTTP statuses and error markers that indicate a transient, retryable failure
+# from the model service (server-side timeout, throttling, gateway hiccup).
+_TRANSIENT_STATUS = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
+_TRANSIENT_MARKERS = (
+    "timeout",
+    "timed out",
+    "temporarily unavailable",
+    "service unavailable",
+    "too many requests",
+    "rate limit",
+    "overloaded",
+    "connection reset",
+    "connection aborted",
+    "connection error",
+    "econnreset",
+)
+
+
+def _is_transient_error(exc: BaseException) -> bool:
+    """Heuristically decide whether a model/agent error is worth retrying.
+
+    Walks the exception chain because the Agent Framework wraps the underlying
+    SDK error (e.g. ``service failed to complete the prompt: ... APIStatusError
+    (Error code: 408 ...)``). Matches on HTTP status codes or transient-failure
+    text so it stays robust across SDK versions.
+    """
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        status = getattr(cur, "status_code", None)
+        if isinstance(status, int) and status in _TRANSIENT_STATUS:
+            return True
+        text = str(cur).lower()
+        if any(marker in text for marker in _TRANSIENT_MARKERS):
+            return True
+        cur = cur.__cause__ or cur.__context__
+    return False
+
+
+async def _run_with_retries(
+    make_call: Callable[[], Awaitable[Any]],
+    *,
+    what: str,
+    attempts: int = 4,
+    base_delay: float = 2.0,
+    max_delay: float = 30.0,
+) -> Any:
+    """Await ``make_call()``, retrying transient model failures with backoff.
+
+    ``make_call`` must build a *fresh* awaitable on each call (a coroutine can
+    only be awaited once). Non-transient errors propagate immediately.
+    """
+    last_exc: BaseException | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return await make_call()
+        except Exception as exc:  # noqa: BLE001 - re-raised below unless transient
+            last_exc = exc
+            if attempt >= attempts or not _is_transient_error(exc):
+                raise
+            delay = min(max_delay, base_delay * 2 ** (attempt - 1))
+            delay += random.uniform(0, delay * 0.25)  # jitter to avoid thundering herd
+            logger.warning(
+                "Transient error from %s (attempt %d/%d): %s — retrying in %.1fs",
+                what,
+                attempt,
+                attempts,
+                exc,
+                delay,
+            )
+            await asyncio.sleep(delay)
+    assert last_exc is not None  # loop only exits via return or raise
+    raise last_exc
+
+
 async def _run_agent(agent: Agent, user_message: str) -> Any:
-    """Tiny wrapper around `agent.run` to keep call sites concise."""
-    return await agent.run(user_message)
+    """Run ``agent.run`` with transient-error retries to keep call sites concise."""
+    return await _run_with_retries(
+        lambda: agent.run(user_message),
+        what=getattr(agent, "name", None) or "agent",
+    )
 
 
 def _text_of(response: Any) -> str:
