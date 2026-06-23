@@ -990,8 +990,8 @@ def _writer_inputs(state: BlogState) -> str:
     report_block = ""
     if state.research_report.strip():
         report_block = (
-            "\n\nDeep-research briefing (synthesized, Bing-grounded — cite via the "
-            "external [E#] sources above):\n" + state.research_report.strip()
+            "\n\nDeep-research briefing (synthesized, Bing-grounded — cite the "
+            "external sources above by their number):\n" + state.research_report.strip()
         )
     diagram_block = ""
     if state.diagram_mermaid.strip():
@@ -1027,6 +1027,15 @@ def _citations_yaml(state: BlogState, *, only: str | None = None) -> str:
         rows = state.all_citations
     if not rows:
         return "(none)"
+    if only is None:
+        # Full list shown next to a draft that cites sources by number. Render
+        # the stable [n] the Writer/Improve must use inline as [n](url).
+        kind_label = {"learn": "Learn", "external": "external"}
+        return "\n".join(
+            f"- [{i}] ({kind_label.get(c.kind, c.kind)}) {c.title} — {c.url}"
+            f"\n    {c.summary}"
+            for i, c in enumerate(rows, start=1)
+        )
     return "\n".join(
         f"- [{c.key}] {c.title} — {c.url}\n    {c.summary}" for c in rows
     )
@@ -1363,18 +1372,21 @@ def _improve_writer_inputs(state: BlogState) -> str:
     report_block = ""
     if state.research_report.strip():
         report_block = (
-            "\n\nDeep-research briefing (synthesized, Bing-grounded — cite via the "
-            "external [E#] sources):\n" + state.research_report.strip()
+            "\n\nDeep-research briefing (synthesized, Bing-grounded — cite the "
+            "external sources by their number):\n" + state.research_report.strip()
         )
     return (
         "You are improving an EXISTING draft, not writing a new one. Preserve the "
         "author's structure, voice, headings, and any code or mermaid blocks. Make "
         "targeted improvements: tighten prose, fix issues raised below, and — most "
-        "importantly — weave in citations from the sources below as footnotes "
-        "([^L#] for Microsoft Learn first, [^E#] for external), then build or "
-        "extend the `## Sources` section to list them. Only cite the sources "
-        "provided; never invent a source or URL. Return the COMPLETE improved "
-        "Markdown document.\n\n"
+        "importantly — weave in citations from the sources below as inline numbered "
+        "links: cite a source as [n](exact-url) using its number and exact URL "
+        "(Learn sources carry the lowest numbers — cite them first). Reuse the same "
+        "number for repeat citations and place adjacent ones like [1](url)[2](url). "
+        "Then build or extend the `## Sources` section as a numbered list "
+        "(`n. [Title](url)`) whose numbers match. Never use [^n]-style footnotes. "
+        "Only cite the sources provided; never invent a source or URL. Return the "
+        "COMPLETE improved Markdown document.\n\n"
         f"Sources (use Learn first):\n{_citations_yaml(state)}\n\n"
         f"Fact-check findings to address:\n{findings}\n\n"
         f"Reviewer recommendations to address:\n{recs}"
@@ -1439,9 +1451,9 @@ async def improve_blog_post(
     1. Finds Microsoft Learn + external/deep-research sources keyed off the
        draft's *own* title and section headings.
     2. Fact-checks and critiques the draft against those sources.
-    3. (When ``rewrite``) re-runs the Writer to weave in Learn-first footnote
-       citations and address the recommendations, preserving the author's
-       structure and voice.
+    3. (When ``rewrite``) re-runs the Writer to weave in Learn-first inline
+       numbered citations (``[n](url)``) and address the recommendations,
+       preserving the author's structure and voice.
 
     Returns the updated state; the caller persists it. ``state.latest_critic``
     holds the recommendations and :func:`build_review_report` renders them.

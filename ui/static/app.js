@@ -461,6 +461,32 @@
     scroll();
   }
 
+  // Turn the ```mermaid fences marked emits (left as <pre><code
+  // class="language-mermaid">) into rendered SVG, so the draft shows the real
+  // diagram instead of its source. `theme` lets the white print/PDF view use a
+  // light palette while the dark chat UI keeps its initialized dark theme.
+  async function renderMermaidIn(container, { theme } = {}) {
+    if (!window.mermaid || !container) return;
+    const blocks = container.querySelectorAll("code.language-mermaid");
+    let i = 0;
+    for (const codeEl of blocks) {
+      const host = codeEl.closest("pre") || codeEl;
+      let src = (codeEl.textContent || "").trim();
+      if (!src) continue;
+      if (theme) src = `%%{init: {'theme':'${theme}'}}%%\n` + src;
+      const id = "mmd-" + Date.now().toString(36) + "-" + i++;
+      try {
+        const { svg } = await window.mermaid.render(id, src);
+        const fig = document.createElement("figure");
+        fig.className = "diagram-render";
+        fig.innerHTML = svg;
+        host.replaceWith(fig);
+      } catch {
+        // Leave the original code block in place if the diagram won't parse.
+      }
+    }
+  }
+
   function renderDraft(markdown, iteration) {
     currentDraft = markdown || "";
     // Derive a real title from the draft's H1 when we don't have one yet (the
@@ -473,6 +499,7 @@
     draftIter.textContent = `· iteration ${iteration ?? "?"}`;
     if (window.marked) {
       draftEl.innerHTML = window.marked.parse(currentDraft);
+      renderMermaidIn(draftEl);
     } else {
       draftEl.textContent = currentDraft;
     }
@@ -701,18 +728,26 @@
 
   downloadBtn.addEventListener("click", downloadMarkdown);
 
-  downloadPdfBtn.addEventListener("click", () => {
+  downloadPdfBtn.addEventListener("click", async () => {
     if (!currentDraft) return;
     const title = currentTitle || "Blog post";
-    // Render the markdown to HTML (reuse marked if available) and open a clean
-    // print window. The browser's "Save as PDF" destination produces the file.
-    const body = window.marked
-      ? window.marked.parse(currentDraft)
-      : `<pre>${currentDraft.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]))}</pre>`;
+    // Open the print window inside the click gesture (so it isn't pop-up
+    // blocked), then fill it after rendering any mermaid diagrams to SVG.
     const win = window.open("", "_blank");
     if (!win) {
       addSystem("Pop-up blocked — allow pop-ups to export PDF.");
       return;
+    }
+    let body;
+    if (window.marked) {
+      const tmp = document.createElement("div");
+      tmp.innerHTML = window.marked.parse(currentDraft);
+      // Turn ```mermaid fences into real SVG (light theme for the white page)
+      // so the PDF shows the diagram, not its source.
+      await renderMermaidIn(tmp, { theme: "neutral" });
+      body = tmp.innerHTML;
+    } else {
+      body = `<pre>${currentDraft.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]))}</pre>`;
     }
     win.document.write(
       `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title>` +
@@ -724,7 +759,8 @@
         `font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}` +
         `code{font:0.9em ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}` +
         `pre code{font-size:inherit;}` +
-        `a{color:#0b66c3;}img{max-width:100%;}` +
+        `a{color:#0b66c3;}img,svg{max-width:100%;height:auto;}` +
+        `figure.diagram-render{margin:1.5em 0;text-align:center;}` +
         `blockquote{margin:1em 0;padding-left:1em;border-left:3px solid #ddd;color:#555;}` +
         `table{border-collapse:collapse;}th,td{border:1px solid #ccc;padding:.4em .6em;}` +
         `@page{margin:1.6cm;}` +

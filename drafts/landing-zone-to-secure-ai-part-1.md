@@ -48,7 +48,7 @@ That word — *agent* — is what raises the stakes.
 Traditional workloads are deterministic: same input, same path, same output.
 Microsoft's own Well-Architected guidance is blunt that AI workloads are
 different — they exhibit **non-deterministic behavior**, which makes them more
-adaptable but much harder to reason about and contain.[^L1] Three properties
+adaptable but much harder to reason about and contain.[1](https://learn.microsoft.com/en-us/azure/well-architected/ai/) Three properties
 turn an "AI feature" into a security problem you have to design for:
 
 - **It calls tools.** An agent does not just emit text; it invokes functions,
@@ -63,7 +63,7 @@ turn an "AI feature" into a security problem you have to design for:
 So Maya does not start with a model. She starts with the same four questions she
 would ask of any workload, and Microsoft's Cloud Adoption Framework gives her the
 checklist to do it: get the environment **AI Ready**, then **Secure** and
-**Govern** it before anything intelligent is deployed.[^L2]
+**Govern** it before anything intelligent is deployed.[2](https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/scenarios/ai/)
 
 ## Part A — The platform foundation (Maya)
 
@@ -97,17 +97,17 @@ architecture for a Foundry chat app puts *every* PaaS dependency behind Azure
 Private Link: the Foundry account (where the models live), AI Search, Storage,
 Cosmos DB, and the Agent Service itself, all reachable only over private
 endpoints with public network access disabled and private DNS zones for internal
-name resolution.[^L3] Traffic stays on the Azure backbone; it never touches the
+name resolution.[3](https://learn.microsoft.com/en-us/azure/architecture/ai-ml/architecture/baseline-azure-ai-foundry-chat) Traffic stays on the Azure backbone; it never touches the
 public internet.
 
 **Outbound — this is the agentic part.** A RAG app mostly *receives* requests.
 An agent *makes* them: every tool call and external lookup is outbound traffic.
 The baseline routes all of it through **Azure Firewall**, which enforces
 **FQDN-based egress rules** so the agent can only reach approved
-destinations.[^L3] Foundry Agent Service's **Standard setup with private
+destinations.[3](https://learn.microsoft.com/en-us/azure/architecture/ai-ml/architecture/baseline-azure-ai-foundry-chat) Foundry Agent Service's **Standard setup with private
 networking** makes this the default: you bring your own VNet and a delegated
 subnet, agent compute is injected into it, and there is **no public
-egress**.[^L4] That single control — egress allow-listing — is the difference
+egress**.[4](https://learn.microsoft.com/en-us/azure/ai-foundry/agents/how-to/virtual-networks) That single control — egress allow-listing — is the difference
 between "an agent that can call the one API it needs" and "an agent that can be
 talked into exfiltrating your data to anywhere."
 
@@ -118,11 +118,11 @@ other workload. Maya provisions identity *before* a single AI service exists:
 
 - **Managed identities replace secrets.** No keys in app settings, no connection
   strings in config. The agent authenticates to Foundry with its managed
-  identity over a private endpoint.[^L3]
+  identity over a private endpoint.[3](https://learn.microsoft.com/en-us/azure/architecture/ai-ml/architecture/baseline-azure-ai-foundry-chat)
 - **Least privilege for *actions*, not just reads.** A read-only RAG agent gets
   `Cognitive Services OpenAI User` (which grants exactly one thing that matters:
   the right to make inference calls with Entra ID — no key access, no
-  deployment rights),[^L7] plus `Search Index Data Reader` and
+  deployment rights),[7](https://learn.microsoft.com/en-us/azure/ai-services/openai/how-to/role-based-access-control) plus `Search Index Data Reader` and
   `Storage Blob Data Reader`. An agent that *writes* gets a separate, explicitly
   scoped role for each action — and nothing more.
 - **One identity per agent, not one for the fleet.** When several agents share an
@@ -137,8 +137,8 @@ Network isolation does not stop prompt injection, because the malicious
 instruction arrives *inside* legitimate data. The platform-level answer is
 **Azure AI Content Safety Prompt Shields**, a dedicated API that screens user
 prompts and grounding documents for adversarial input before the model acts on
-it.[^L6] Foundry Agent Service can enforce content safety as part of the agent
-runtime rather than something Sam bolts on later.[^L3] Maya treats this as part
+it.[6](https://learn.microsoft.com/en-us/azure/ai-services/content-safety/concepts/jailbreak-detection) Foundry Agent Service can enforce content safety as part of the agent
+runtime rather than something Sam bolts on later.[3](https://learn.microsoft.com/en-us/azure/architecture/ai-ml/architecture/baseline-azure-ai-foundry-chat) Maya treats this as part
 of the foundation, not an application detail.
 
 ### Governance, cost, and observability
@@ -187,7 +187,7 @@ The requirement — "answer questions about company information" — still needs
 unstructured content turned into something a model can reason over: collect,
 chunk, embed, index. This is Retrieval-Augmented Generation. But for an agent,
 RAG is **one tool among several**, exposed through the Agent Service's search
-tooling, not the entire application.[^L3] The ingestion job writes to Storage and
+tooling, not the entire application.[3](https://learn.microsoft.com/en-us/azure/architecture/ai-ml/architecture/baseline-azure-ai-foundry-chat) The ingestion job writes to Storage and
 AI Search **over their private endpoints**, authenticated by the managed identity
 — the data never leaves the boundary.
 
@@ -201,14 +201,14 @@ tool for actions. Two design choices matter most:
   agent metadata in **your own Azure resources** — Cosmos DB for threads and
   agent definitions, Storage for files, AI Search for vectors — so agent state
   stays in your tenant and under your governance, not a Microsoft-managed
-  multitenant store.[^L5] (If you have used only basic setups, this is the part
+  multitenant store.[5](https://learn.microsoft.com/en-us/azure/ai-foundry/agents/concepts/standard-agent-setup) (If you have used only basic setups, this is the part
   people forget: standard setup means *you* bring the Cosmos DB account.)
 - **How much autonomy.** For read-only Q&A, a declarative **prompt agent** hosted
   by Agent Service is enough. The moment the agent takes consequential actions,
   Sam wants explicit orchestration and **human-in-the-loop** approval — which is
   exactly when Microsoft's guidance points you from a prompt agent to a
   code-driven **hosted agent** built on a framework like the **Microsoft Agent
-  Framework** or Semantic Kernel.[^L3] Deterministic control over the action
+  Framework** or Semantic Kernel.[3](https://learn.microsoft.com/en-us/azure/architecture/ai-ml/architecture/baseline-azure-ai-foundry-chat) Deterministic control over the action
   path is a feature, not a regression.
 
 ### Now the model question matters
@@ -220,7 +220,7 @@ Foundry account** Maya already stood up, and Foundry Agent Service runs the agen
 in its project. "The model" is not limited to Azure OpenAI either — the Foundry
 catalog also sells non-OpenAI models (Grok, Llama, DeepSeek, MAI-DS-R1), and
 Azure OpenAI models are the ones that "power agents in Foundry Agent
-Service."[^L8] It is one component in a system, not the center of it.
+Service."[8](https://learn.microsoft.com/en-us/azure/ai-foundry/agents/concepts/model-region-support) It is one component in a system, not the center of it.
 
 ### Evaluate before production
 
@@ -302,7 +302,7 @@ and an editable version of the diagram above in
 
 > Azure AI product names, model availability per region, private DNS zone
 > namespaces, and RBAC role names change frequently — the Foundry roles were
-> renamed recently, for example.[^L4] Verify current details in Microsoft Learn
+> renamed recently, for example.[4](https://learn.microsoft.com/en-us/azure/ai-foundry/agents/how-to/virtual-networks) Verify current details in Microsoft Learn
 > before you deploy.
 
 ## What Part 2 covers
@@ -322,11 +322,11 @@ organization is ready to use it properly.
 
 ## Sources
 
-[^L1]: Azure Well-Architected Framework — AI workloads (non-deterministic behavior). <https://learn.microsoft.com/en-us/azure/well-architected/ai/>
-[^L2]: Cloud Adoption Framework — AI adoption (AI Ready, Secure AI, Govern AI checklists). <https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/scenarios/ai/>
-[^L3]: Azure Architecture Center — Baseline Azure AI Foundry chat reference architecture (private endpoints, Azure Firewall egress, managed identity, prompt vs. hosted agents, content safety). <https://learn.microsoft.com/en-us/azure/architecture/ai-ml/architecture/baseline-azure-ai-foundry-chat>
-[^L4]: Azure AI Foundry — Use a virtual network with the Agent Service (Standard setup with private networking; Foundry RBAC role rename). <https://learn.microsoft.com/en-us/azure/ai-foundry/agents/how-to/virtual-networks>
-[^L5]: Azure AI Foundry — Standard agent setup (BYO Cosmos DB, Storage, AI Search, Key Vault for agent state). <https://learn.microsoft.com/en-us/azure/ai-foundry/agents/concepts/standard-agent-setup>
-[^L6]: Azure AI Content Safety — Prompt Shields (adversarial prompt / document detection). <https://learn.microsoft.com/en-us/azure/ai-services/content-safety/concepts/jailbreak-detection>
-[^L7]: Azure OpenAI — Role-based access control (Cognitive Services OpenAI User: inference via Entra ID, no key access). <https://learn.microsoft.com/en-us/azure/ai-services/openai/how-to/role-based-access-control>
-[^L8]: Microsoft Foundry — Models supported in Foundry Agent Service (Azure OpenAI models power agents; non-OpenAI Foundry Models sold by Azure: Grok, Llama, DeepSeek, MAI-DS-R1). <https://learn.microsoft.com/en-us/azure/ai-foundry/agents/concepts/model-region-support>
+1. [Azure Well-Architected Framework — AI workloads (non-deterministic behavior)](https://learn.microsoft.com/en-us/azure/well-architected/ai/)
+2. [Cloud Adoption Framework — AI adoption (AI Ready, Secure AI, Govern AI checklists)](https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/scenarios/ai/)
+3. [Azure Architecture Center — Baseline Azure AI Foundry chat reference architecture (private endpoints, Azure Firewall egress, managed identity, prompt vs. hosted agents, content safety)](https://learn.microsoft.com/en-us/azure/architecture/ai-ml/architecture/baseline-azure-ai-foundry-chat)
+4. [Azure AI Foundry — Use a virtual network with the Agent Service (Standard setup with private networking; Foundry RBAC role rename)](https://learn.microsoft.com/en-us/azure/ai-foundry/agents/how-to/virtual-networks)
+5. [Azure AI Foundry — Standard agent setup (BYO Cosmos DB, Storage, AI Search, Key Vault for agent state)](https://learn.microsoft.com/en-us/azure/ai-foundry/agents/concepts/standard-agent-setup)
+6. [Azure AI Content Safety — Prompt Shields (adversarial prompt / document detection)](https://learn.microsoft.com/en-us/azure/ai-services/content-safety/concepts/jailbreak-detection)
+7. [Azure OpenAI — Role-based access control (Cognitive Services OpenAI User: inference via Entra ID, no key access)](https://learn.microsoft.com/en-us/azure/ai-services/openai/how-to/role-based-access-control)
+8. [Microsoft Foundry — Models supported in Foundry Agent Service (Azure OpenAI models power agents; non-OpenAI Foundry Models sold by Azure: Grok, Llama, DeepSeek, MAI-DS-R1)](https://learn.microsoft.com/en-us/azure/ai-foundry/agents/concepts/model-region-support)

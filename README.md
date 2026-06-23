@@ -115,7 +115,8 @@ Already have a draft? Point `blog-writer improve` at it. Instead of writing a ne
 post from a seed, it reads the file, finds sources keyed off the draft's **own
 title and section headings** (curated MS Learn first, then external/deep
 research), fact-checks and critiques it, and rewrites it to weave in Learn-first
-footnote citations — preserving your structure and voice.
+inline citations (`[n](url)`) plus a numbered `## Sources` list — preserving your
+structure and voice.
 
 ```pwsh
 # Find sources, recommend improvements, and rewrite with citations.

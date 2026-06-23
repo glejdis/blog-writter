@@ -22,12 +22,13 @@ count and don't need a citation.
 ## Process
 
 1. Walk the draft top-to-bottom.
-2. For each concrete claim, locate the cited source (by footnote marker).
+2. For each concrete claim, locate the cited source (by its inline `[n](url)`
+   citation link).
 3. Skim that source's summary. Decide:
    - **Supported** — the source clearly backs the claim.
    - **Partial** — the source is related but doesn't quite back it.
    - **Unsupported** — no relevant source cited.
-   - **Missing-citation** — the claim has no footnote at all.
+   - **Missing-citation** — the claim has no citation at all.
 
 ## Output format
 
@@ -36,7 +37,7 @@ findings:
   - section: <H2 heading>
     claim: <short verbatim or paraphrase>
     status: <supported|partial|unsupported|missing-citation>
-    citation: <footnote key or null>
+    citation: <source number or null>
     suggestion: <what the Writer should change, or null>
 ok_count: <int>
 issue_count: <int>
