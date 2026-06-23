@@ -6,6 +6,7 @@ Wire protocol — JSON messages on the WebSocket
 **Client → server**
 
 * ``{type: "start", topic, toc?, instructions?, autonomous?, stub?}``
+* ``{type: "improve", draft?, path?, topic?, deep_research?, recommend_only?, stub?}``
 * ``{type: "answer", value}``      — user picked an option / typed a free-form answer
 * ``{type: "revise", instruction}``— after the first draft is ready, ask for changes
 * ``{type: "done"}``               — accept the current draft as final
@@ -22,9 +23,11 @@ Wire protocol — JSON messages on the WebSocket
 * ``{type: "fact_findings", items}``                       — fact-checker output
 * ``{type: "draft", markdown, iteration}``                 — current draft body
 * ``{type: "citations", kind, items}``                     — internal/external sources
+* ``{type: "recommendations", items, total}``              — improvement recommendations
 * ``{type: "ask", id, prompt, choices?}``                  — please answer
 * ``{type: "revision_done", iteration}``                   — after a revise turn
 * ``{type: "revision_persisted", draft_path, sources_path}`` — after revision is saved
+* ``{type: "improve_persisted", improved_path, review_path, sources_path}`` — after improve is saved
 * ``{type: "done", final_verdict}``                        — pipeline emitted by the workflow itself
 * ``{type: "persisted", draft_path, sources_path}``        — server saved the draft to disk
 * ``{type: "error", message}``                             — something blew up
@@ -57,6 +60,8 @@ from blog_writer.config import PROJECT_ROOT, load_config
 load_dotenv(PROJECT_ROOT / ".env")
 from blog_writer.observability import setup_observability
 from blog_writer.workflows.blog_pipeline import (
+    build_review_report,
+    improve_blog_post,
     revise_blog_post,
     run_blog_pipeline,
 )
@@ -256,6 +261,95 @@ async def _run_revision_in_session(session: WSSession, instruction: str) -> None
         session.emit({"type": "error", "message": f"{type(exc).__name__}: {exc}"})
 
 
+async def _persist_improve(
+    state: BlogState, *, recommend_only: bool
+) -> tuple[str | None, str | None, str | None]:
+    """Write the review report, sources.json, and (optionally) the improved draft."""
+    config = load_config()
+    config.ensure_dirs()
+    drafts = Path(config.drafts_dir)
+    slug = _slugify(state.angle or state.seed)
+
+    review_path = drafts / f"{slug}.review.md"
+    review_path.write_text(build_review_report(state), encoding="utf-8")
+
+    crit = state.latest_critic
+    sources_path = drafts / f"{slug}.sources.json"
+    sources_path.write_text(
+        json.dumps(
+            {
+                "title": state.angle,
+                "critic_total": crit.total if crit else None,
+                "recommendations": list(crit.feedback) if crit else [],
+                "citations": [c.__dict__ for c in state.all_citations],
+                "fact_findings": [
+                    {
+                        "section": f.section,
+                        "status": f.status,
+                        "claim": f.claim,
+                        "suggestion": f.suggestion,
+                    }
+                    for f in state.fact_findings
+                ],
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    improved_path: str | None = None
+    if not recommend_only and state.draft:
+        path = drafts / f"{slug}.improved.md"
+        path.write_text(state.draft, encoding="utf-8")
+        improved_path = str(path)
+    return improved_path, str(review_path), str(sources_path)
+
+
+async def _run_improve_in_session(
+    session: WSSession,
+    *,
+    draft_text: str,
+    topic: str | None,
+    deep_research: bool,
+    recommend_only: bool,
+    stub: bool,
+) -> None:
+    """Improve an existing draft: find sources, recommend changes, re-cite."""
+    config = load_config(stub=stub, deep_research=deep_research)
+    config.ensure_dirs()
+    setup_observability(config)
+
+    def on_event(event: dict[str, Any]) -> None:
+        session.emit(event)
+
+    try:
+        state = await improve_blog_post(
+            draft_text,
+            config=config,
+            topic=topic,
+            on_event=on_event,
+            rewrite=not recommend_only,
+        )
+        session.state = state
+        improved_path, review_path, sources_path = await _persist_improve(
+            state, recommend_only=recommend_only
+        )
+        session.emit(
+            {
+                "type": "improve_persisted",
+                "improved_path": improved_path,
+                "review_path": review_path,
+                "sources_path": sources_path,
+            }
+        )
+    except asyncio.CancelledError:
+        session.emit({"type": "log", "message": "Improve cancelled."})
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Improve failed")
+        session.emit({"type": "error", "message": f"{type(exc).__name__}: {exc}"})
+
+
 # -----------------------------------------------------------------------------
 # WebSocket endpoint
 # -----------------------------------------------------------------------------
@@ -296,6 +390,43 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                         toc=(msg.get("toc") or None),
                         instructions=(msg.get("instructions") or None),
                         autonomous=bool(msg.get("autonomous")),
+                        stub=bool(msg.get("stub")),
+                    )
+                )
+
+            elif mtype == "improve":
+                if session.pipeline_task and not session.pipeline_task.done():
+                    session.emit(
+                        {"type": "error", "message": "A run is already in progress."}
+                    )
+                    continue
+                draft_text = msg.get("draft") or ""
+                path = (msg.get("path") or "").strip()
+                if path:
+                    file = Path(path)
+                    if not file.exists():
+                        session.emit({"type": "error", "message": f"File not found: {path}"})
+                        continue
+                    try:
+                        draft_text = file.read_text(encoding="utf-8")
+                    except OSError as exc:
+                        session.emit({"type": "error", "message": f"Could not read file: {exc}"})
+                        continue
+                if not draft_text.strip():
+                    session.emit(
+                        {
+                            "type": "error",
+                            "message": "Provide a draft — paste Markdown or give a server file path.",
+                        }
+                    )
+                    continue
+                session.pipeline_task = asyncio.create_task(
+                    _run_improve_in_session(
+                        session,
+                        draft_text=draft_text,
+                        topic=((msg.get("topic") or "").strip() or None),
+                        deep_research=bool(msg.get("deep_research")),
+                        recommend_only=bool(msg.get("recommend_only")),
                         stub=bool(msg.get("stub")),
                     )
                 )

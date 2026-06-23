@@ -160,14 +160,16 @@ blog-writer ui --host 0.0.0.0 --port 8080
 ```
 
 The UI is a single-page chat app built on FastAPI + WebSockets and vanilla
-JS. The left pane holds the brief form (topic, optional TOC, optional extra
-instructions, autonomous/stub toggles) and a live stage indicator. The right
-pane is the chat transcript plus the rendered draft. After the pipeline
-finishes, type free-form revision instructions into the bar at the bottom of
-the chat to iterate; each turn re-runs the Writer (and optionally the
-Fact-Checker + Critic) and ships an updated draft back into the UI. Drafts
-are persisted to `drafts/<slug>.md` after every successful pipeline run and
-every revision pass — the chat shows the saved path each time.
+JS. The left pane has a **mode toggle**: *New post* (the brief form — topic,
+optional TOC, extra instructions, autonomous/stub toggles) or *Improve a
+draft* (paste Markdown or point at a server file path, with deep-research /
+recommend-only / stub options). A live stage indicator sits below. The right
+pane is the chat transcript plus the rendered draft. After a run finishes,
+type free-form revision instructions into the bar at the bottom of the chat to
+iterate; each turn re-runs the Writer (and optionally the Fact-Checker +
+Critic) and ships an updated draft back into the UI. New posts persist to
+`drafts/<slug>.md`; improve runs persist `drafts/<slug>.improved.md`,
+`.review.md`, and `.sources.json` — the chat shows the saved paths each time.
 
 ## Test
 

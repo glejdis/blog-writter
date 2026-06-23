@@ -19,6 +19,11 @@
   const newBtn = $("new-btn");
   const progressFill = $("progress-fill");
   const emptyState = $("empty-state");
+  const improveForm = $("improve-form");
+  const improveBtn = $("improve-btn");
+  const modeToggle = $("mode-toggle");
+  const modeNew = $("mode-new");
+  const modeImprove = $("mode-improve");
 
   const STAGE_ORDER = [
     ["ideation", "Ideation"],
@@ -56,6 +61,11 @@
     startBtn.disabled = busy;
     startBtn.classList.toggle("busy", busy);
     startBtn.textContent = busy ? "Working…" : "Start writing";
+    if (improveBtn) {
+      improveBtn.disabled = busy;
+      improveBtn.classList.toggle("busy", busy);
+      improveBtn.textContent = busy ? "Working…" : "Improve draft";
+    }
   }
 
   function hideEmptyState() {
@@ -67,6 +77,7 @@
   let currentTitle = "blog-post";
   let downloadPath = null;
   let pipelineRunning = false;
+  let improveMode = false;
   let currentExcalidraw = null;
   let currentDiagramTitle = "architecture";
 
@@ -149,6 +160,7 @@
         renderDiagram(msg);
         break;
       case "critic": {
+        if (improveMode) break; // shown via the "recommendations" card instead
         const approved = String(msg.verdict || "").toLowerCase().includes("approve");
         addCard(
           `Critic · round ${msg.round}`,
@@ -189,6 +201,15 @@
           );
         }
         break;
+      case "recommendations":
+        addCard(
+          `Recommendations${msg.total != null ? ` · score ${msg.total}` : ""}`,
+          (msg.items || []).map((f) => `<li>${escape(f)}</li>`).join("") ||
+            "<li>No changes recommended — looks solid.</li>",
+          "ul",
+          { variant: "ok", icon: "🛠️" },
+        );
+        break;
       case "draft":
         renderDraft(msg.markdown, msg.iteration);
         break;
@@ -202,25 +223,45 @@
         if (msg.draft_path) downloadPath = msg.draft_path;
         downloadBtn.disabled = !currentDraft;
         break;
+      case "improve_persisted":
+        if (msg.improved_path) {
+          downloadPath = msg.improved_path;
+          addLog(`Improved draft saved → ${msg.improved_path}`);
+        }
+        if (msg.review_path) addLog(`Review saved → ${msg.review_path}`);
+        if (msg.sources_path) addLog(`Sources saved → ${msg.sources_path}`);
+        break;
       case "persisted":
         downloadPath = msg.draft_path;
         if (msg.draft_path) {
           addLog(`Draft saved → ${msg.draft_path}`);
         }
         break;
-      case "done":
+      case "done": {
         setBusy(false);
         progressFill.style.width = "100%";
-        downloadBtn.disabled = !currentDraft;
-        copyBtn.disabled = !currentDraft;
-        acceptBtn.disabled = false;
+        const hasDraft = !!currentDraft;
+        downloadBtn.disabled = !hasDraft;
+        copyBtn.disabled = !hasDraft;
+        acceptBtn.disabled = !hasDraft;
         newBtn.hidden = false;
-        addSystem(
-          `Pipeline complete — verdict: ${msg.final_verdict}. You can now ask for revisions below, or accept.`,
-        );
-        reviseForm.classList.remove("hidden");
-        reviseInput.focus();
+        if (improveMode) {
+          addSystem(
+            hasDraft
+              ? "Draft improved — sources added and recommendations applied. Revise further below, or accept."
+              : "Recommendations and sources ready. Toggle off “Recommend only” to also rewrite the draft.",
+          );
+        } else {
+          addSystem(
+            `Pipeline complete — verdict: ${msg.final_verdict}. You can now ask for revisions below, or accept.`,
+          );
+        }
+        if (hasDraft) {
+          reviseForm.classList.remove("hidden");
+          reviseInput.focus();
+        }
         break;
+      }
       case "error":
         addError(msg.message);
         break;
@@ -441,6 +482,7 @@
     const topic = $("topic").value.trim();
     if (!topic) return;
     if (pipelineRunning) return;
+    improveMode = false;
     hideEmptyState();
     newBtn.hidden = true;
     setBusy(true);
@@ -454,6 +496,52 @@
       stub: $("stub").checked,
     });
   });
+
+  // Mode toggle: switch the left pane between "New post" and "Improve a draft".
+  if (modeToggle) {
+    modeToggle.addEventListener("click", (e) => {
+      const btn = e.target.closest(".mode-btn");
+      if (!btn || pipelineRunning) return;
+      const mode = btn.dataset.mode;
+      for (const b of modeToggle.querySelectorAll(".mode-btn")) {
+        b.classList.toggle("active", b === btn);
+      }
+      if (modeNew) modeNew.hidden = mode !== "new";
+      if (modeImprove) modeImprove.hidden = mode !== "improve";
+    });
+  }
+
+  if (improveForm) {
+    improveForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      if (pipelineRunning) return;
+      const draft = $("improve-draft").value;
+      const path = $("improve-path").value.trim();
+      if (!draft.trim() && !path) {
+        addError("Paste a draft or give a server file path first.");
+        return;
+      }
+      improveMode = true;
+      hideEmptyState();
+      newBtn.hidden = true;
+      setBusy(true);
+      const recommendOnly = $("improve-recommend").checked;
+      addUser(
+        path
+          ? `Improve draft from: ${path}`
+          : `Improve pasted draft${recommendOnly ? " (recommend only)" : ""}`,
+      );
+      send({
+        type: "improve",
+        draft,
+        path: path || null,
+        topic: $("improve-topic").value.trim() || null,
+        deep_research: $("improve-deep").checked,
+        recommend_only: recommendOnly,
+        stub: $("improve-stub").checked,
+      });
+    });
+  }
 
   reviseForm.addEventListener("submit", (e) => {
     e.preventDefault();

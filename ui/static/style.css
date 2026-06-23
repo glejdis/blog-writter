@@ -309,6 +309,45 @@ button.busy::after {
   padding: 0.65rem 1rem;
 }
 
+#improve-btn {
+  width: 100%;
+  margin-top: 0.3rem;
+  padding: 0.65rem 1rem;
+}
+
+/* Mode toggle: New post / Improve a draft */
+.mode-toggle {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  margin-bottom: 1rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.mode-toggle .mode-btn {
+  flex: 1;
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid transparent;
+  padding: 0.45rem 0.6rem;
+  font-weight: 600;
+}
+.mode-toggle .mode-btn:hover:not(:disabled) {
+  filter: none;
+  box-shadow: none;
+  color: var(--text);
+}
+.mode-toggle .mode-btn.active {
+  background: var(--accent-dim);
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+#improve-draft {
+  font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+}
+
 /* Stage stepper with connector line */
 .stages {
   list-style: none;

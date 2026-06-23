@@ -248,3 +248,76 @@ def test_revise_with_empty_instruction_errors(client: TestClient) -> None:
         ws.send_json({"type": "revise", "instruction": "  "})
         msg = ws.receive_json()
         assert msg["type"] == "error"
+
+
+# -----------------------------------------------------------------------------
+# Improve mode (WebSocket)
+# -----------------------------------------------------------------------------
+
+_IMPROVE_DRAFT = """# Securing Agentic AI on Azure
+
+## Identity before infrastructure
+
+Managed identities replace secrets.
+
+## Private networking
+
+Use private endpoints for every dependency.
+"""
+
+
+def test_improve_without_draft_errors(client: TestClient) -> None:
+    with client.websocket_connect("/ws") as ws:
+        ws.receive_json()  # ready
+        ws.send_json({"type": "improve", "draft": "   "})
+        msg = ws.receive_json()
+        assert msg["type"] == "error"
+
+
+def test_improve_via_websocket_stub(client: TestClient) -> None:
+    seen: list[str] = []
+    with client.websocket_connect("/ws") as ws:
+        ws.receive_json()  # ready
+        ws.send_json({"type": "improve", "draft": _IMPROVE_DRAFT, "stub": True})
+        for _ in range(500):
+            msg = ws.receive_json()
+            seen.append(msg["type"])
+            if msg["type"] == "improve_persisted":
+                break
+            if msg["type"] == "error":
+                pytest.fail(f"improve failed: {msg}")
+        else:
+            pytest.fail("improve did not emit 'improve_persisted'")
+
+    assert "recommendations" in seen
+    assert "draft" in seen
+    assert "done" in seen
+    assert seen[-1] == "improve_persisted"
+
+
+def test_improve_recommend_only_via_websocket_stub(client: TestClient) -> None:
+    persisted: dict[str, Any] = {}
+    with client.websocket_connect("/ws") as ws:
+        ws.receive_json()  # ready
+        ws.send_json(
+            {
+                "type": "improve",
+                "draft": _IMPROVE_DRAFT,
+                "stub": True,
+                "recommend_only": True,
+            }
+        )
+        for _ in range(500):
+            msg = ws.receive_json()
+            if msg["type"] == "improve_persisted":
+                persisted = msg
+                break
+            if msg["type"] == "error":
+                pytest.fail(f"improve failed: {msg}")
+        else:
+            pytest.fail("improve did not finish")
+
+    # Recommend-only: a review + sources are saved, but no improved draft.
+    assert persisted.get("improved_path") is None
+    assert persisted.get("review_path")
+    assert persisted.get("sources_path")

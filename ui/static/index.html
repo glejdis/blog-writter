@@ -49,8 +49,14 @@
     <main class="layout">
       <!-- LEFT: setup + stages -->
       <section class="pane pane-left">
-        <h2>1 · Brief</h2>
-        <form id="brief-form">
+        <div class="mode-toggle" id="mode-toggle">
+          <button type="button" class="mode-btn active" data-mode="new">New post</button>
+          <button type="button" class="mode-btn" data-mode="improve">Improve a draft</button>
+        </div>
+
+        <div id="mode-new">
+          <h2>1 · Brief</h2>
+          <form id="brief-form">
           <label>
             Topic <span class="required">*</span>
             <input
@@ -90,6 +96,55 @@
           </details>
           <button id="start-btn" type="submit">Start writing</button>
         </form>
+        </div>
+
+        <div id="mode-improve" hidden>
+          <h2>1 · Draft</h2>
+          <form id="improve-form">
+            <label>
+              Paste your draft (Markdown) <span class="required">*</span>
+              <textarea
+                id="improve-draft"
+                rows="10"
+                placeholder="# Your title&#10;&#10;Paste the whole post here — it keeps your structure and voice."
+              ></textarea>
+            </label>
+            <details>
+              <summary>…or read a file on the server</summary>
+              <label>
+                File path
+                <input
+                  id="improve-path"
+                  type="text"
+                  placeholder="e.g. drafts/landing-zone-to-secure-ai-part-1.md"
+                />
+              </label>
+            </details>
+            <details>
+              <summary>Optional steering</summary>
+              <label>
+                Topic override
+                <input
+                  id="improve-topic"
+                  type="text"
+                  placeholder="default: derived from the draft"
+                />
+              </label>
+              <div class="row">
+                <label class="check">
+                  <input type="checkbox" id="improve-deep" /> Deep research
+                </label>
+                <label class="check">
+                  <input type="checkbox" id="improve-recommend" /> Recommend only
+                </label>
+                <label class="check">
+                  <input type="checkbox" id="improve-stub" /> Stub mode
+                </label>
+              </div>
+            </details>
+            <button id="improve-btn" type="submit">Improve draft</button>
+          </form>
+        </div>
 
         <h2>2 · Agents</h2>
         <ol id="stages" class="stages"></ol>
