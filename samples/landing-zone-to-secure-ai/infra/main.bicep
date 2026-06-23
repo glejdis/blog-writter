@@ -46,7 +46,8 @@ var storageAccountName = take(toLower('stai${env}${suffix}'), 24)
 var cosmosAccountName = toLower('cosmos-ai-${env}-${suffix}')
 var searchServiceName = toLower('srch-ai-${env}-${suffix}')
 var keyVaultName = take(toLower('kv-ai-${env}${suffix}'), 24)
-var openAiAccountName = toLower('oai-ai-${env}-${suffix}')
+var foundryAccountName = toLower('foundry-ai-${env}-${suffix}')
+var foundryProjectName = 'proj-ai-${env}'
 
 module network 'modules/network.bicep' = {
   name: 'network'
@@ -95,13 +96,17 @@ module state 'modules/state.bicep' = {
   }
 }
 
-module ai 'modules/ai-service.bicep' = {
-  name: 'ai-service'
+module foundry 'modules/foundry.bicep' = {
+  name: 'foundry'
   params: {
     location: location
-    name: openAiAccountName
+    name: foundryAccountName
+    projectName: foundryProjectName
     tags: tags
     peSubnetId: network.outputs.peSubnetId
+    agentSubnetId: network.outputs.agentSubnetId
+    networkInjection: true
+    dnsZoneServicesAiId: network.outputs.dnsZoneServicesAiId
     dnsZoneOpenAiId: network.outputs.dnsZoneOpenAiId
     dnsZoneCognitiveId: network.outputs.dnsZoneCognitiveId
   }
@@ -111,7 +116,7 @@ module rbac 'modules/rbac.bicep' = {
   name: 'rbac'
   params: {
     principalId: identity.outputs.principalId
-    openAiAccountName: ai.outputs.accountName
+    foundryAccountName: foundry.outputs.accountName
     searchServiceName: state.outputs.searchServiceName
     storageAccountName: state.outputs.storageAccountName
   }
@@ -132,7 +137,8 @@ module governance 'modules/governance.bicep' = {
 output managedIdentityPrincipalId string = identity.outputs.principalId
 output managedIdentityClientId string = identity.outputs.clientId
 
-@description('Handoff artifact #2: the private AI service the agent calls.')
-output openAiAccountId string = ai.outputs.accountId
+@description('Handoff artifact #2: the private Foundry account + project the agent runs in.')
+output foundryAccountId string = foundry.outputs.accountId
+output foundryProjectName string = foundry.outputs.projectName
 output spokeVnetId string = network.outputs.spokeVnetId
 output agentSubnetId string = network.outputs.agentSubnetId

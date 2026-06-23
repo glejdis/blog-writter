@@ -115,6 +115,7 @@ var privateDnsZoneNames = [
   'privatelink.blob.${environment().suffixes.storage}'
   'privatelink.documents.azure.com'
   'privatelink.vaultcore.azure.net'
+  'privatelink.services.ai.azure.com'
 ]
 
 resource dnsZones 'Microsoft.Network/privateDnsZones@2020-06-01' = [for zone in privateDnsZoneNames: {
@@ -146,3 +147,4 @@ output dnsZoneSearchId string = dnsZones[2].id
 output dnsZoneBlobId string = dnsZones[3].id
 output dnsZoneCosmosId string = dnsZones[4].id
 output dnsZoneVaultId string = dnsZones[5].id
+output dnsZoneServicesAiId string = dnsZones[6].id

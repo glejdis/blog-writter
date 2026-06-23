@@ -96,10 +96,11 @@ and for agents it has two halves that tutorials almost always miss.
 
 **Inbound and east-west — private endpoints.** The enterprise baseline
 architecture for a Foundry chat app puts *every* PaaS dependency behind Azure
-Private Link: Azure OpenAI, AI Search, Storage, Cosmos DB, and the Agent Service
-itself, all reachable only over private endpoints with public network access
-disabled and private DNS zones for internal name resolution.[^L3] Traffic stays
-on the Azure backbone; it never touches the public internet.
+Private Link: the Foundry account (where the models live), AI Search, Storage,
+Cosmos DB, and the Agent Service itself, all reachable only over private
+endpoints with public network access disabled and private DNS zones for internal
+name resolution.[^L3] Traffic stays on the Azure backbone; it never touches the
+public internet.
 
 **Outbound — this is the agentic part.** A RAG app mostly *receives* requests.
 An agent *makes* them: every tool call and external lookup is outbound traffic.
@@ -156,7 +157,7 @@ debug or defend.
 None of these are exotic. They are the *default* outcome when the model
 conversation happens first:
 
-- A public Azure OpenAI endpoint, open to the internet.
+- A public model endpoint, open to the internet.
 - An API key pasted into config and later leaked in a repo.
 - An agent with unrestricted egress, turned into an exfiltration tool by a
   poisoned document.
@@ -215,9 +216,13 @@ tool for actions. Two design choices matter most:
 ### Now the model question matters
 
 Only here does *"which model?"* finally earn an answer — judged on accuracy,
-latency, cost, context window, and data sensitivity. The model is deployed into
-the **private** Azure OpenAI resource Maya already stood up. It is one component
-in a system, not the center of it.
+latency, cost, context window, and data sensitivity. Both the models and the
+agent come from **Microsoft Foundry**: the model is deployed into the **private
+Foundry account** Maya already stood up, and Foundry Agent Service runs the agent
+in its project. "The model" is not limited to Azure OpenAI either — the Foundry
+catalog also sells non-OpenAI models (Grok, Llama, DeepSeek, MAI-DS-R1), and
+Azure OpenAI models are the ones that "power agents in Foundry Agent
+Service."[^L8] It is one component in a system, not the center of it.
 
 ### Evaluate before production
 
@@ -259,7 +264,7 @@ flowchart LR
             AG[Prompt / Hosted Agent]
         end
         subgraph PE["Private Endpoints"]
-            AOAI[Azure OpenAI]
+            AOAI[Foundry account<br/>models]
             Search[Azure AI Search]
             Storage[(Storage)]
             Cosmos[(Cosmos DB<br/>agent state)]
@@ -312,7 +317,7 @@ scale. The foundation Maya built is what makes all of it possible.
 
 ---
 
-The story of an enterprise AI project does not begin with Azure OpenAI. It begins
+The story of an enterprise AI project does not begin with a model deployment. It begins
 with architecture, identity, egress, and governance. Only after those
 conversations happen does the first model get deployed — and by then the
 organization is ready to use it properly.
@@ -326,3 +331,4 @@ organization is ready to use it properly.
 [^L5]: Azure AI Foundry — Standard agent setup (BYO Cosmos DB, Storage, AI Search, Key Vault for agent state). <https://learn.microsoft.com/en-us/azure/ai-foundry/agents/concepts/standard-agent-setup>
 [^L6]: Azure AI Content Safety — Prompt Shields (adversarial prompt / document detection). <https://learn.microsoft.com/en-us/azure/ai-services/content-safety/concepts/jailbreak-detection>
 [^L7]: Azure OpenAI — Role-based access control (Cognitive Services OpenAI User: inference via Entra ID, no key access). <https://learn.microsoft.com/en-us/azure/ai-services/openai/how-to/role-based-access-control>
+[^L8]: Microsoft Foundry — Models supported in Foundry Agent Service (Azure OpenAI models power agents; non-OpenAI Foundry Models sold by Azure: Grok, Llama, DeepSeek, MAI-DS-R1). <https://learn.microsoft.com/en-us/azure/ai-foundry/agents/concepts/model-region-support>

@@ -9,11 +9,11 @@ It deploys **Part A only** — no model is deployed here; that is Part B (the ag
 
 | Module | Resources |
 | --- | --- |
-| `network.bicep` | Simulated hub (`AzureFirewallSubnet`), AI spoke VNet with `snet-app` / `snet-pep` / delegated `snet-agent`, peering, 6 private DNS zones + links |
+| `network.bicep` | Simulated hub (`AzureFirewallSubnet`), AI spoke VNet with `snet-app` / `snet-pep` / delegated `snet-agent`, peering, 7 private DNS zones (incl. `services.ai.azure.com`) + links |
 | `firewall.bicep` | Azure Firewall + policy with an **FQDN allow-list** (agent egress control) |
 | `identity.bicep` | User-assigned managed identity (one per agent) |
 | `state.bicep` | Cosmos DB, Storage, AI Search, Key Vault — public access disabled, private endpoints + DNS zone groups |
-| `ai-service.bicep` | Azure OpenAI / Foundry account — public access disabled, private endpoint |
+| `foundry.bicep` | **Microsoft Foundry account** (`kind: AIServices`) + Foundry **project** — agent subnet injected (`networkInjections`), public access disabled, private endpoint |
 | `rbac.bicep` | Least-privilege roles: `Cognitive Services OpenAI User`, `Search Index Data Reader`, `Storage Blob Data Reader` |
 | `governance.bicep` | Log Analytics workspace + monthly budget with an 80% alert |
 

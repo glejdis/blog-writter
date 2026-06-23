@@ -78,7 +78,7 @@ vnet-ai-spoke-<env>       # AI spoke
 snet-pep-<env>            # private endpoints subnet
 snet-agent-<env>          # delegated subnet for Agent Service compute
 id-ai-app-<env>           # user-assigned managed identity (one per agent)
-oai-ai-<env>              # Azure OpenAI / Foundry account
+foundry-ai-<env>          # Microsoft Foundry account (AIServices) + project
 srch-ai-<env>             # Azure AI Search
 stai<env><uniq>           # Storage (no dashes, <=24 chars, lowercase)
 cosmos-ai-<env>           # Cosmos DB (agent thread + metadata store)
@@ -174,7 +174,8 @@ for ZONE in \
   privatelink.search.windows.net \
   privatelink.blob.core.windows.net \
   privatelink.documents.azure.com \
-  privatelink.vaultcore.azure.net ; do
+  privatelink.vaultcore.azure.net \
+  privatelink.services.ai.azure.com ; do
     az network private-dns zone create -g $RG -n $ZONE
     az network private-dns link vnet create -g $RG --zone-name $ZONE \
       -n link-spoke --virtual-network vnet-ai-spoke-$ENV --registration-enabled false
@@ -238,29 +239,38 @@ least 3000 RU/s — standard setup provisions three 1000 RU/s containers.)
 
 ---
 
-## Phase 4 — AI services, private only
+## Phase 4 — Foundry account (AI Services), private only
 
-Deploy the Foundry / Azure OpenAI account with **public network access disabled**
-and a **private endpoint** into `snet-pep`.
+Deploy the **Microsoft Foundry account** (`kind: AIServices`) with **public
+network access disabled** and a **private endpoint** into `snet-pep`. This single
+account is the model *and* agent plane: model deployments live here, and Foundry
+Agent Service runs the agent in its project.
 
 ```bash
-az cognitiveservices account create -g $RG -n oai-ai-$ENV -l $LOC \
-  --kind OpenAI --sku S0 \
-  --custom-domain oai-ai-$ENV \
+az cognitiveservices account create -g $RG -n foundry-ai-$ENV -l $LOC \
+  --kind AIServices --sku S0 \
+  --custom-domain foundry-ai-$ENV \
   --public-network-access Disabled \
   --assign-identity
 
-OAI_ID=$(az cognitiveservices account show -g $RG -n oai-ai-$ENV --query id -o tsv)
+FOUNDRY_ID=$(az cognitiveservices account show -g $RG -n foundry-ai-$ENV --query id -o tsv)
 
-az network private-endpoint create -g $RG -n pep-oai-$ENV \
+az network private-endpoint create -g $RG -n pep-foundry-$ENV \
   --vnet-name vnet-ai-spoke-$ENV --subnet snet-pep \
-  --private-connection-resource-id $OAI_ID \
-  --group-id account --connection-name oai-conn
+  --private-connection-resource-id $FOUNDRY_ID \
+  --group-id account --connection-name foundry-conn
 
+# Wire the private endpoint to the AI Services / Foundry DNS zone (also add the
+# openai and cognitiveservices zones).
 az network private-endpoint dns-zone-group create -g $RG \
-  --endpoint-name pep-oai-$ENV -n zg-oai \
-  --private-dns-zone privatelink.openai.azure.com --zone-name openai
+  --endpoint-name pep-foundry-$ENV -n zg-foundry \
+  --private-dns-zone privatelink.services.ai.azure.com --zone-name servicesai
 ```
+
+> The CLI shows the account + private endpoint. The **Foundry project**, the
+> **agent subnet network injection** (`networkInjections`), and the model
+> deployment are provisioned by the Bicep in [`infra/`](./infra/) (see
+> `modules/foundry.bicep`) or the official standard-agent template.
 
 > For a full Foundry Agent Service standard setup, the recommended path is the
 > Bicep/Terraform quickstart in the Agent Service docs, which wires the account,
@@ -275,10 +285,10 @@ Bind the managed identity to each service with the minimum role. A **read-only**
 agent gets exactly these — no key access, no write:
 
 ```bash
-# Azure OpenAI — inference calls via Entra ID only
+# Foundry models — inference calls via Entra ID only
 az role assignment create --assignee-object-id $APP_ID_PRINCIPAL \
   --assignee-principal-type ServicePrincipal \
-  --role "Cognitive Services OpenAI User" --scope $OAI_ID
+  --role "Cognitive Services OpenAI User" --scope $FOUNDRY_ID
 
 # AI Search — query the index
 az role assignment create --assignee-object-id $APP_ID_PRINCIPAL \
@@ -332,7 +342,7 @@ Nothing intelligent is deployed yet, but you can hand Sam:
 Validate from the jumpbox inside the spoke:
 
 ```bash
-nslookup oai-ai-lab.openai.azure.com   # should resolve to a 10.1.2.x private IP
+nslookup foundry-ai-lab.cognitiveservices.azure.com   # should resolve to a 10.1.2.x private IP
 ```
 
 If it resolves to a public IP, your DNS zone link or zone group is wrong — fix
@@ -404,7 +414,7 @@ shared hub, firewall, or landing zone components.
     firewall.bicep       # Azure Firewall + egress rules + route tables
     identity.bicep       # user-assigned managed identity (one per agent)
     state.bicep          # cosmos + storage + search + key vault (BYO agent state)
-    ai-service.bicep     # foundry/openai account + PE + DNS zone group
+    foundry.bicep        # Foundry account (AIServices) + project + PE + DNS zone group
     rbac.bicep           # least-privilege role assignments
     governance.bicep     # budget, policy, diagnostics, content safety
   main.bicep             # composes Part A

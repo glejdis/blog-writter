@@ -52,6 +52,13 @@
       "title": "Azure OpenAI — Role-based access control",
       "url": "https://learn.microsoft.com/en-us/azure/ai-services/openai/how-to/role-based-access-control",
       "summary": "Cognitive Services OpenAI User grants inference API calls with Microsoft Entra ID but not key access, deployment creation, or quota. Confirms the least-privilege role used for a read-only inference path."
+    },
+    {
+      "key": "L8",
+      "kind": "learn",
+      "title": "Microsoft Foundry — Models supported in Foundry Agent Service",
+      "url": "https://learn.microsoft.com/en-us/azure/ai-foundry/agents/concepts/model-region-support",
+      "summary": "Both the models and the agents come from Microsoft Foundry. Azure OpenAI models power agents in Foundry Agent Service and require a Foundry project; the Foundry catalog also sells non-OpenAI models (Grok, Llama, DeepSeek, MAI-DS-R1, gpt-oss). Used to reframe the model plane as the Foundry account/project, not a standalone Azure OpenAI resource."
     }
   ],
   "pocs": [
