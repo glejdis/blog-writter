@@ -50,7 +50,7 @@ Framework, Well-Architected, Architecture Center, AI Foundry docs) as the
 | Orchestrator (Editor-in-Chief) | Final review of assembled draft + samples | `gpt-5.4` |
 | Ideation | Seed → 3–5 angles | `gpt-5-mini` |
 | Internal Knowledge | MS Learn MCP search + scope filtering + summarize | `gpt-5-mini` |
-| Research | Broad MS Learn + Azure-Samples search via the custom Learn Browser MCP | `gpt-5.4` |
+| Research | External research — defaults to the Foundry `o3-deep-research` model (agentic, Bing-grounded), falling back to a broad MS Learn + Azure-Samples search via the custom Learn Browser MCP | `o3-deep-research` → `gpt-5.4` fallback |
 | Planner | Outline + PoC requirements | reasoning model (`o4-mini`) |
 | PoC Builder | Generate code + run in sandbox + capture output | `gpt-5.3-codex` |
 | Diagrammer | Generate an Excalidraw + Mermaid architecture diagram per post | `gpt-5.4` |
@@ -61,6 +61,15 @@ Framework, Well-Architected, Architecture Center, AI Foundry docs) as the
 All model assignments are swappable in
 [`src/blog_writer/models/config.py`](src/blog_writer/models/config.py) or via
 the `BLOG_WRITER_MODEL_*` environment variables.
+
+> **Deep research is on by default.** The external-research stage uses the
+> Foundry `o3-deep-research` model (agentic, Bing-grounded) whenever the
+> `AZURE_AI_DEEP_RESEARCH_ENDPOINT`, `AZURE_AI_DEEP_RESEARCH_MODEL`, and
+> `AZURE_AI_BING_CONNECTION_ID` env vars are set. When they're absent it
+> automatically falls back to the lightweight Learn Browser MCP search, so
+> nothing breaks if you haven't provisioned an `o3-deep-research` deployment.
+> Opt out entirely with `BLOG_WRITER_DEEP_RESEARCH=false` (or
+> `--no-deep-research` on `blog-writer improve`).
 
 ## Pipeline
 
@@ -209,8 +218,9 @@ structure and voice.
 # Find sources, recommend improvements, and rewrite with citations.
 blog-writer improve drafts/landing-zone-to-secure-ai-part-1.md
 
-# Use the Foundry o3-deep-research model for source finding.
-blog-writer improve drafts/my-post.md --deep-research
+# Deep research (Foundry o3-deep-research, Bing-grounded) is ON by default.
+# Opt out and use the lightweight Learn/GitHub search instead:
+blog-writer improve drafts/my-post.md --no-deep-research
 
 # Just the recommendations + sources — don't touch the prose.
 blog-writer improve drafts/my-post.md --recommend-only

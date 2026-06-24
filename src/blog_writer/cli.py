@@ -3,7 +3,7 @@
 Commands:
 
     blog-writer new --seed "agentic Azure topics" [--autonomous] [--stub]
-    blog-writer improve <draft.md> [--deep-research] [--recommend-only]
+    blog-writer improve <draft.md> [--no-deep-research] [--recommend-only]
     blog-writer ui
 
 `new` writes:
@@ -139,10 +139,14 @@ def improve_post(
     deep_research: Annotated[
         bool,
         typer.Option(
-            "--deep-research",
-            help="Use the Foundry o3-deep-research model for source finding.",
+            "--deep-research/--no-deep-research",
+            help=(
+                "Use the Foundry o3-deep-research model for source finding. On by "
+                "default; automatically falls back to lightweight search when "
+                "unconfigured. Disable with --no-deep-research."
+            ),
         ),
-    ] = False,
+    ] = True,
     recommend_only: Annotated[
         bool,
         typer.Option(

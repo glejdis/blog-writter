@@ -64,11 +64,13 @@ class AppConfig(BaseSettings):
         description="Override the MS Learn Docs MCP endpoint (rarely needed).",
     )
     deep_research: bool = Field(
-        default=False,
+        default=True,
         description=(
             "Use the Foundry o3-deep-research model (agentic, Bing-grounded) for the "
             "external research stage instead of the lightweight Learn/GitHub search. "
-            "Requires AZURE_AI_DEEP_RESEARCH_* env vars + a Bing grounding connection."
+            "On by default; automatically falls back to lightweight search when the "
+            "AZURE_AI_DEEP_RESEARCH_* env vars + Bing grounding connection are absent. "
+            "Disable with BLOG_WRITER_DEEP_RESEARCH=false."
         ),
     )
 
