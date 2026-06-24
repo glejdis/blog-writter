@@ -1,11 +1,12 @@
 """Deep research via the Foundry ``o3-deep-research`` model.
 
-This is the heavyweight, agentic alternative to :func:`blog_writer.tools.
-bing_search.search_web`. It drives the Azure AI Agents **Deep Research tool**
-(an ``o3-deep-research`` deployment grounded with Bing Search) which performs
-multi-step web research and returns a synthesized, citation-rich report.
+This is the heavyweight alternative to :func:`blog_writer.tools.bing_search.
+search_web`. It drives the ``o3-deep-research`` model with the **web search
+tool** on the Foundry **Responses API** — the supported successor to the (now
+deprecated) Azure AI Agents Deep Research tool — to perform multi-step,
+Bing-grounded web research and return a synthesized, citation-rich report.
 
-The Deep Research tool runs against a *separate* Foundry project (the
+Deep research runs against a *separate* Foundry project (the
 ``o3-deep-research`` model is only available in a handful of regions, e.g.
 westus / norwayeast), so it reads its own connection details from the
 environment rather than the main ``foundry`` provider config:
@@ -13,21 +14,24 @@ environment rather than the main ``foundry`` provider config:
 * ``AZURE_AI_DEEP_RESEARCH_ENDPOINT``    — project endpoint
   (``https://<acct>.services.ai.azure.com/api/projects/<proj>``)
 * ``AZURE_AI_DEEP_RESEARCH_MODEL``       — ``o3-deep-research`` deployment name
-* ``AZURE_AI_DEEP_RESEARCH_AGENT_MODEL`` — orchestration chat deployment (e.g. ``gpt-4o``)
-* ``AZURE_AI_BING_CONNECTION_ID``        — full resource id of the Bing grounding connection
+* ``AZURE_AI_BING_CONNECTION_ID``        — the project's Bing grounding connection
+  (the web-search tool resolves it automatically from the project; required
+  here only so we know a Grounding-with-Bing connection exists)
 
-Auth is Microsoft Entra ID via ``DefaultAzureCredential`` (no keys).
+Auth is Microsoft Entra ID via ``DefaultAzureCredential`` (no keys), scoped to
+``https://ai.azure.com/.default``.
 
-The underlying SDK (``azure-ai-agents``) is synchronous and runs can take
-several minutes, so the public entry point :func:`deep_research` offloads the
-work to a thread. On any misconfiguration or failure it returns
-``("", [])`` so the caller can fall back to the lightweight search.
+A deep-research pass can take several minutes, so the run is dispatched in
+``background`` mode and polled, and the public entry point :func:`deep_research`
+offloads the blocking work to a thread. On any misconfiguration or failure it
+returns ``("", [])`` so the caller can fall back to the lightweight search.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -84,118 +88,121 @@ def deep_research_available() -> bool:
 
 
 def _run_deep_research(query: str, max_citations: int, timeout_s: int) -> tuple[str, list[dict[str, str]]]:
-    """Blocking deep-research run. Returns ``(report_markdown, citations)``."""
+    """Blocking deep-research run via the Responses API. Returns ``(report, citations)``.
+
+    Uses the ``o3-deep-research`` model with the web-search tool on the Foundry
+    Responses API (the supported successor to the deprecated Agents Deep
+    Research tool). The run is dispatched in ``background`` mode and polled to
+    completion, since a deep-research pass can take several minutes.
+    """
     cfg = _config_from_env()
     if cfg is None:
         return "", []
 
     try:
-        from azure.ai.agents import AgentsClient
-        from azure.ai.agents.models import (
-            AgentThreadCreationOptions,
-            DeepResearchTool,
-            ListSortOrder,
-            MessageRole,
-            ThreadMessageOptions,
-        )
         from azure.identity import DefaultAzureCredential
+        from openai import OpenAI
     except ImportError as exc:  # pragma: no cover - defensive
-        logger.warning("azure-ai-agents not installed: %s", exc)
+        logger.warning("openai/azure-identity not installed: %s", exc)
         return "", []
 
     instructions = (
         "You are a meticulous technical research assistant. Research the topic "
-        "thoroughly using web sources, prioritising official Microsoft Learn docs, "
+        "thoroughly with web search, prioritising official Microsoft Learn docs, "
         "Azure architecture guidance, and reputable engineering blogs. Produce a "
         "concise, well-structured briefing with concrete facts, version numbers, "
-        "and trade-offs that a technical author can cite. Always ground claims in "
-        "your cited sources.\n\n"
-        "IMPORTANT: Do NOT ask the user any clarifying questions. Make reasonable "
-        "assumptions, choose the most useful interpretation, and proceed directly "
-        "to performing web research. Your final message MUST be the completed "
-        "research briefing with inline source citations — never a list of questions."
+        "and trade-offs that a technical author can cite, grounding every claim in "
+        "an inline source citation. Do NOT ask clarifying questions — make "
+        "reasonable assumptions and write the completed briefing directly."
     )
 
-    task = (
-        "Research the following topic and write the final briefing now. Do not ask "
-        "clarifying questions; make reasonable assumptions and proceed.\n\n"
-        f"Topic: {query}"
-    )
-
-    credential = DefaultAzureCredential()
+    base_url = cfg["endpoint"].rstrip("/") + "/openai/v1/"
+    # Codes worth retrying with backoff (e.g. per-minute rate limits, transient
+    # server hiccups) rather than failing straight to the lightweight fallback.
+    transient_codes = {"rate_limit_exceeded", "server_error", "tool_server_error", "timeout"}
+    max_attempts = 3
+    backoff_s = 45
+    deadline = time.monotonic() + timeout_s
     try:
-        with AgentsClient(endpoint=cfg["endpoint"], credential=credential) as agents:
-            dr_tool = DeepResearchTool(
-                bing_grounding_connection_id=cfg["bing_conn"],
-                deep_research_model=cfg["dr_model"],
-            )
-            agent = agents.create_agent(
-                model=cfg["agent_model"],
-                name="blog-deep-researcher",
+        credential = DefaultAzureCredential()
+        # A token taken now comfortably outlives a multi-minute research run.
+        token = credential.get_token("https://ai.azure.com/.default").token
+        client = OpenAI(base_url=base_url, api_key=token)
+
+        response = None
+        for attempt in range(1, max_attempts + 1):
+            response = client.responses.create(
+                model=cfg["dr_model"],
                 instructions=instructions,
-                tools=dr_tool.definitions,
+                input=query,
+                tools=[{"type": "web_search_preview"}],
+                background=True,
             )
-            try:
-                run = agents.create_thread_and_process_run(
-                    agent_id=agent.id,
-                    thread=AgentThreadCreationOptions(
-                        messages=[ThreadMessageOptions(role=MessageRole.USER, content=task)]
-                    ),
-                    polling_interval=10,
-                )
-                if run.status != "completed":
+            while response.status in ("queued", "in_progress"):
+                if time.monotonic() > deadline:
                     logger.warning(
-                        "Deep research run did not complete: status=%s error=%s",
-                        run.status,
-                        getattr(run, "last_error", None),
+                        "Deep research timed out after %ss (status=%s)", timeout_s, response.status
                     )
+                    try:
+                        client.responses.cancel(response.id)
+                    except Exception:  # noqa: BLE001 - best-effort
+                        pass
                     return "", []
+                time.sleep(5)
+                response = client.responses.retrieve(response.id)
 
-                report, citations = "", []
-                messages = agents.messages.list(
-                    thread_id=run.thread_id, order=ListSortOrder.DESCENDING
+            if response.status == "completed":
+                break
+
+            err = getattr(response, "error", None)
+            code = getattr(err, "code", None)
+            if code in transient_codes and attempt < max_attempts and time.monotonic() + backoff_s < deadline:
+                logger.warning(
+                    "Deep research attempt %d/%d failed transiently (%s); retrying in %ss",
+                    attempt,
+                    max_attempts,
+                    code,
+                    backoff_s,
                 )
-                for msg in messages:
-                    if msg.role != MessageRole.AGENT:
-                        continue
-                    report = "\n\n".join(
-                        t.text.value for t in getattr(msg, "text_messages", []) if t.text
-                    ).strip()
-                    for ann in getattr(msg, "url_citation_annotations", []) or []:
-                        uc = ann.url_citation
-                        if uc and uc.url:
-                            citations.append(
-                                {
-                                    "title": uc.title or uc.url,
-                                    "url": uc.url,
-                                    "snippet": "",
-                                    "type": "deep-research",
-                                }
-                            )
-                    break  # most recent agent message is the final report
+                time.sleep(backoff_s)
+                continue
+            logger.warning(
+                "Deep research did not complete: status=%s error=%s", response.status, err
+            )
+            return "", []
 
-                # De-dupe citations by URL, preserving order.
-                seen: set[str] = set()
-                deduped = []
-                for c in citations:
-                    if c["url"] in seen:
+        if response is None or response.status != "completed":
+            return "", []
+
+        report = (getattr(response, "output_text", "") or "").strip()
+
+        citations: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for item in getattr(response, "output", None) or []:
+            if getattr(item, "type", None) != "message":
+                continue
+            for part in getattr(item, "content", None) or []:
+                if getattr(part, "type", None) != "output_text":
+                    continue
+                for ann in getattr(part, "annotations", None) or []:
+                    if getattr(ann, "type", None) != "url_citation":
                         continue
-                    seen.add(c["url"])
-                    deduped.append(c)
-                return report, deduped[:max_citations]
-            finally:
-                try:
-                    agents.delete_agent(agent.id)
-                except Exception:  # noqa: BLE001 - best-effort cleanup
-                    logger.debug("Failed to delete deep-research agent", exc_info=True)
+                    url = getattr(ann, "url", None)
+                    if not url or url in seen:
+                        continue
+                    seen.add(url)
+                    citations.append(
+                        {
+                            "title": getattr(ann, "title", None) or url,
+                            "url": url,
+                            "snippet": "",
+                            "type": "deep-research",
+                        }
+                    )
+        return report, citations[:max_citations]
     except Exception as exc:  # noqa: BLE001
         logger.warning("Deep research failed: %s", exc)
         return "", []
-    finally:
-        try:
-            credential.close()
-        except Exception:  # noqa: BLE001
-            pass
 
 
 async def deep_research(
