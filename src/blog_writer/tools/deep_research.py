@@ -61,6 +61,28 @@ def _config_from_env() -> dict[str, str] | None:
     }
 
 
+_REQUIRED_DEEP_RESEARCH_VARS = (
+    "AZURE_AI_DEEP_RESEARCH_ENDPOINT",
+    "AZURE_AI_DEEP_RESEARCH_MODEL",
+    "AZURE_AI_BING_CONNECTION_ID",
+)
+
+
+def missing_deep_research_vars() -> list[str]:
+    """Return the required deep-research env vars that are currently unset."""
+    return [name for name in _REQUIRED_DEEP_RESEARCH_VARS if not os.environ.get(name)]
+
+
+def deep_research_available() -> bool:
+    """Return ``True`` when all deep-research connection env vars are present.
+
+    Lets callers tell whether a requested deep-research run will actually invoke
+    the ``o3-deep-research`` model or silently fall back to lightweight search,
+    so they can surface that to the user instead of degrading silently.
+    """
+    return not missing_deep_research_vars()
+
+
 def _run_deep_research(query: str, max_citations: int, timeout_s: int) -> tuple[str, list[dict[str, str]]]:
     """Blocking deep-research run. Returns ``(report_markdown, citations)``."""
     cfg = _config_from_env()

@@ -41,7 +41,11 @@ from blog_writer.config import AppConfig
 from blog_writer.models import ModelMap, load_model_map
 from blog_writer.tools.bing_search import bing_search_stub, search_web
 from blog_writer.tools.code_sandbox import run_in_sandbox
-from blog_writer.tools.deep_research import deep_research
+from blog_writer.tools.deep_research import (
+    deep_research,
+    deep_research_available,
+    missing_deep_research_vars,
+)
 from blog_writer.tools.excalidraw import (
     DiagramSpec,
     parse_diagram_spec,
@@ -176,7 +180,18 @@ async def run_blog_pipeline(
     )
     emit("stage_end", stage="internal_knowledge")
 
-    emit("stage_start", stage="research", label="External research (broad)")
+    deep_active = config.deep_research and deep_research_available()
+    if config.deep_research and not deep_active:
+        missing = ", ".join(missing_deep_research_vars())
+        log_and_emit(
+            f"⚠ Deep research is ON but not configured (missing {missing}). "
+            "Falling back to lightweight web search."
+        )
+    emit(
+        "stage_start",
+        stage="research",
+        label="Deep research (Bing-grounded)" if deep_active else "External research (broad)",
+    )
     log_and_emit("Gathering external research…")
     state = await _external_research(state, config=config, models=models)
     log_and_emit(f"Got {len(state.external_hits)} external hits.")
@@ -1571,7 +1586,14 @@ async def improve_blog_post(
     emit("stage_end", stage="internal_knowledge")
 
     # 2. External / deep research.
-    label = "Deep research (Bing-grounded)" if config.deep_research else "External research"
+    deep_active = config.deep_research and deep_research_available()
+    if config.deep_research and not deep_active:
+        missing = ", ".join(missing_deep_research_vars())
+        log_and_emit(
+            f"⚠ Deep research is ON but not configured (missing {missing}). "
+            "Falling back to lightweight web search."
+        )
+    label = "Deep research (Bing-grounded)" if deep_active else "External research"
     emit("stage_start", stage="research", label=label)
     log_and_emit(f"{label}…")
     await _gather_external_for_draft(state, config=config, max_hits=config.max_learn_hits)
