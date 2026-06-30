@@ -1,0 +1,12 @@
+name: blog-writer
+metadata:
+  template: azd-init
+
+services:
+  web:
+    project: .
+    language: python
+    host: containerapp
+    docker:
+      path: ./Dockerfile
+      remoteBuild: true
