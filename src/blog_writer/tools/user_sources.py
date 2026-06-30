@@ -17,8 +17,10 @@ import logging
 import re
 from dataclasses import dataclass
 from io import BytesIO
+from typing import TYPE_CHECKING
 
-from blog_writer.workflows.state import Citation
+if TYPE_CHECKING:
+    from blog_writer.workflows.state import Citation
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +104,8 @@ def extract_pdf_text(data: bytes) -> str:
 
 def citation_from_pdf(pdf: UserPDF, *, index: int) -> Citation | None:
     """Build a Citation from an uploaded PDF, or None when it has no text."""
+    from blog_writer.workflows.state import Citation
+
     text = _clean_text(extract_pdf_text(pdf.data))
     if not text:
         return None
@@ -117,6 +121,8 @@ def citation_from_pdf(pdf: UserPDF, *, index: int) -> Citation | None:
 
 def _fetch_url(url: str) -> Citation | None:
     """Fetch a URL and turn it into a Citation. Returns None on failure."""
+    from blog_writer.workflows.state import Citation
+
     try:
         import httpx
     except ImportError:  # pragma: no cover - dependency is declared in pyproject
@@ -159,6 +165,8 @@ def ingest_user_sources(
     Failures (unreachable link, unparseable PDF) are skipped with a log line so a
     single bad input never aborts the whole Improve run.
     """
+    from blog_writer.workflows.state import Citation  # noqa: F401 — runtime cycle guard
+
     citations: list[Citation] = []
     total = 0
     index = 1

@@ -38,6 +38,24 @@ _MINIMAL_PDF = (
 )
 
 
+def test_user_sources_importable_first(monkeypatch) -> None:
+    """Regression: importing user_sources (or cli) before workflows must not
+    trigger a circular import. The container entrypoint imports cli first, which
+    previously crashed with 'cannot import name UserPDF'."""
+    import subprocess
+    import sys
+
+    for module in ("blog_writer.tools.user_sources", "blog_writer.cli"):
+        result = subprocess.run(
+            [sys.executable, "-c", f"import {module}"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, (
+            f"importing {module} first failed:\n{result.stderr}"
+        )
+
+
 def test_extract_pdf_text_reads_content() -> None:
     text = user_sources.extract_pdf_text(_MINIMAL_PDF)
     assert "Hello source world" in text
