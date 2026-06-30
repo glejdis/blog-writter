@@ -20,6 +20,7 @@ AgentRole = Literal[
     "planner",
     "poc_builder",
     "diagrammer",
+    "stylist",
     "writer",
     "fact_checker",
     "critic",
@@ -33,6 +34,7 @@ AGENT_ROLES: tuple[AgentRole, ...] = (
     "planner",
     "poc_builder",
     "diagrammer",
+    "stylist",
     "writer",
     "fact_checker",
     "critic",
@@ -55,6 +57,7 @@ class ModelMap:
     planner: str = "o4-mini"
     poc_builder: str = "gpt-5.3-codex"
     diagrammer: str = "gpt-5.4"
+    stylist: str = "gpt-5-mini"
     writer: str = "claude-opus-4-7"
     fact_checker: str = "gpt-5-mini"
     critic: str = "gpt-5.4"

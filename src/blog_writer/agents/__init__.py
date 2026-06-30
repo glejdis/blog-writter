@@ -17,6 +17,7 @@ from blog_writer.agents.orchestrator import build_orchestrator_agent
 from blog_writer.agents.planner import build_planner_agent
 from blog_writer.agents.poc_builder import build_poc_builder_agent
 from blog_writer.agents.research import build_research_agent
+from blog_writer.agents.stylist import build_stylist_agent
 from blog_writer.agents.writer import build_writer_agent
 
 __all__ = [
@@ -30,5 +31,6 @@ __all__ = [
     "build_planner_agent",
     "build_poc_builder_agent",
     "build_research_agent",
+    "build_stylist_agent",
     "build_writer_agent",
 ]

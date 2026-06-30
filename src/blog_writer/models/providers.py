@@ -92,6 +92,25 @@ _STUB_RESPONSES: dict[AgentRole, str] = {
         "```\n"
         "Sandbox run: exit_code=0, output_snippet='An Azure landing zone is...'"
     ),
+    "stylist": (
+        "# House Style Card (learned from the corpus)\n\n"
+        "**Voice:** experienced engineer writing for engineers — direct, dry, "
+        "lightly opinionated. First person plural ('we') when describing what was "
+        "tried. No marketing language.\n\n"
+        "**Structure:** lead with the takeaway (top-down). Open with one or two "
+        "sentences stating the conclusion, then drill into the how. Use a "
+        "problem→solution arc inside sections when there's a real pain point. End "
+        "with a short checklist or decision table when comparing options.\n\n"
+        "**Sentences:** short and plain. One idea per sentence. Prefer concrete "
+        "specifics (numbers, resource names, exact errors) over generalities.\n\n"
+        "**Formatting:** H2 per outline section, H3 sparingly. Code blocks always "
+        "carry a language tag and show only the load-bearing lines. Decision tables "
+        "for trade-offs.\n\n"
+        "**Banned phrases:** unlock, leverage, harness, supercharge, seamless, "
+        "in today's fast-paced world, game-changer, robust, cutting-edge.\n\n"
+        "**Do:** explain the why before the how; call out failures honestly; keep "
+        "paragraphs under four sentences."
+    ),
     "writer": (
         "# Landing Zones for Agentic Workloads on Azure\n\n"
         "Agentic workloads need the same disciplined foundation any production workload "

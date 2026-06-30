@@ -121,6 +121,9 @@ class BlogState:
     diagram_excalidraw: str = ""  # self-contained .excalidraw JSON
     diagram_mermaid: str = ""  # embeddable flowchart for the draft
 
+    # After the stylist learns the house style from the example corpus
+    style_guide: str = ""  # the Style Card the Writer follows
+
     # After writing
     draft: str | None = None
     iteration: int = 0

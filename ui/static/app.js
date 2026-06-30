@@ -39,6 +39,7 @@
     ["approve_plan", "Plan approval"],
     ["poc_builder", "PoC builder"],
     ["diagrammer", "Architecture"],
+    ["stylist", "Style"],
     ["writer", "Writer"],
     ["fact_checker", "Fact checker"],
     ["critic", "Critic"],

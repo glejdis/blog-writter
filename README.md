@@ -54,6 +54,7 @@ Framework, Well-Architected, Architecture Center, AI Foundry docs) as the
 | Planner | Outline + PoC requirements | reasoning model (`o4-mini`) |
 | PoC Builder | Generate code + run in sandbox + capture output | `gpt-5.3-codex` |
 | Diagrammer | Generate an Excalidraw + Mermaid architecture diagram per post | `gpt-5.4` |
+| Stylist | Learn a house writing style from example posts (`knowledge_base/style_corpus/`) → Style Card the Writer follows | `gpt-5-mini` |
 | Writer | Long-form prose, Learn-first citations | `claude-opus-4-7` or `gpt-5.5` |
 | Fact-Checker | Verify each claim against a source | `gpt-5-mini` |
 | Critic | Score draft vs. rubric, request revisions | `gpt-5.4` |
@@ -81,6 +82,7 @@ Seed
  → Planner (outline + PoC specs)
  → [HUMAN: approve plan]              (skip with --autonomous)
  → PoC Builder (generate + execute samples)
+ → Stylist (learn house style from knowledge_base/style_corpus/)
  → Writer (draft)
  → Fact-Checker
  → Critic   ──┐  (loop until threshold or max revisions)
@@ -191,6 +193,20 @@ scoping, caching, and an optional Azure-Samples GitHub search.
 The same server can be launched standalone and attached to Claude Desktop,
 VS Code AI Toolkit, Cursor, or any other MCP client — see the [server
 README](mcp_servers/learn_browser/README.md) for instructions.
+
+### Writing style (Stylist agent)
+
+The **Stylist agent** teaches the Writer your publication's voice. Drop example
+posts (e.g. *The Cloud Wire*) as `.md` files into
+[`knowledge_base/style_corpus/`](knowledge_base/style_corpus/); before drafting,
+the Stylist reads them, distills a **Style Card** (voice, structure, sentence
+rules, banned clichés), and the Writer follows it — for *new* posts and
+`improve` runs alike. The card shapes *how* the post reads; it never overrides
+the Learn-first citation or fact-checking rules.
+
+The folder ships with a structural-patterns reference and one sample post, so the
+stage works out of the box. Add your own examples to steer the voice, or turn the
+stage off with `BLOG_WRITER_STYLE=false`.
 
 ## Run
 
@@ -345,6 +361,7 @@ ui/
   static/         # vanilla-JS single-page chat UI
 knowledge_base/
   learn_scopes.yaml   # allow-list of MS Learn root paths
+  style_corpus/       # example posts the Stylist learns the house style from
 evals/            # sample seed topics + tiny eval harness
 samples/          # generated PoCs
 drafts/           # generated drafts

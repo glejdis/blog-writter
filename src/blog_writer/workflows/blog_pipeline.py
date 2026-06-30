@@ -35,6 +35,7 @@ from blog_writer.agents import (
     build_orchestrator_agent,
     build_planner_agent,
     build_poc_builder_agent,
+    build_stylist_agent,
     build_writer_agent,
 )
 from blog_writer.config import AppConfig
@@ -53,6 +54,7 @@ from blog_writer.tools.excalidraw import (
     spec_from_sections,
 )
 from blog_writer.tools.learn_mcp import load_learn_scopes, search_learn, search_learn_stub
+from blog_writer.tools.style_corpus import load_style_corpus
 from blog_writer.workflows.state import (
     BlogState,
     Citation,
@@ -259,6 +261,12 @@ async def run_blog_pipeline(
             mermaid=state.diagram_mermaid,
         )
         emit("stage_end", stage="diagrammer")
+
+    # 6c. Stylist — learn the house style from the example corpus.
+    if config.style:
+        emit("stage_start", stage="stylist", label="Learning house style")
+        state = await _derive_style(state, config=config, models=models, log=log_and_emit)
+        emit("stage_end", stage="stylist")
 
     # 7. Writer ⇄ Critic revision loop
     emit("stage_start", stage="writer", label="Writing draft")
@@ -740,6 +748,39 @@ def _diag_edge(source: str, target: str, label: str = "") -> Any:
 
 
 # -----------------------------------------------------------------------------
+# Stage 6b — Stylist (learn the house style from the example corpus)
+# -----------------------------------------------------------------------------
+
+
+async def _derive_style(
+    state: BlogState,
+    *,
+    config: AppConfig,
+    models: ModelMap,
+    log: Callable[[str], None] | None = None,
+) -> BlogState:
+    """Learn a house Style Card from the example corpus and store it on state.
+
+    No-op (leaves ``state.style_guide`` empty) when the corpus is empty, so the
+    Writer simply falls back to its built-in style.
+    """
+    _log = log or (lambda _msg: None)
+    corpus = load_style_corpus(config.style_corpus_dir)
+    if not corpus.strip():
+        _log("No style corpus found — skipping the Stylist stage.")
+        return state
+    _log("Learning the house style from the example corpus…")
+    agent = build_stylist_agent(config, models)
+    prompt = (
+        "Analyze the example posts below and produce the House Style Card.\n\n"
+        "--- BEGIN STYLE CORPUS ---\n" + corpus + "\n--- END STYLE CORPUS ---"
+    )
+    response = await _run_agent(agent, prompt)
+    state.style_guide = _text_of(response).strip()
+    return state
+
+
+# -----------------------------------------------------------------------------
 # Stage 6 — Writing
 # -----------------------------------------------------------------------------
 
@@ -1044,6 +1085,24 @@ def _reference_block(state: BlogState, guidance: str) -> str:
     )
 
 
+def _style_block(state: BlogState) -> str:
+    """Render the learned house Style Card for a Writer prompt.
+
+    Returns an empty string when no style guide was produced (empty corpus or the
+    Stylist stage disabled), so the Writer falls back to its built-in style.
+    """
+    guide = (state.style_guide or "").strip()
+    if not guide:
+        return ""
+    return (
+        "\n\nHouse style to follow (learned from the publication's example posts). "
+        "Apply this for voice, structure, sentence rhythm, and diction. It shapes "
+        "*how* you write — it does NOT override the citation, sourcing, or "
+        "factual-accuracy rules above; those still win on any conflict.\n"
+        "--- BEGIN HOUSE STYLE CARD ---\n" + guide + "\n--- END HOUSE STYLE CARD ---"
+    )
+
+
 def _planner_inputs(state: BlogState) -> str:
     extras: list[str] = []
     if state.suggested_toc.strip():
@@ -1110,6 +1169,7 @@ def _writer_inputs(state: BlogState) -> str:
         + report_block
         + diagram_block
         + extras
+        + _style_block(state)
         + _reference_block(
             state,
             "Treat it as raw material, not a template: borrow strong phrasing or "
@@ -1493,6 +1553,7 @@ def _improve_writer_inputs(state: BlogState) -> str:
         f"Fact-check findings to address:\n{findings}\n\n"
         f"Reviewer recommendations to address:\n{recs}"
         + report_block
+        + _style_block(state)
         + f"\n\nExisting draft:\n{state.draft or ''}"
     )
 
@@ -1632,6 +1693,10 @@ async def improve_blog_post(
 
     # 5. Rewrite the draft with citations woven in.
     if rewrite:
+        if config.style:
+            emit("stage_start", stage="stylist", label="Learning house style")
+            state = await _derive_style(state, config=config, models=models, log=log_and_emit)
+            emit("stage_end", stage="stylist")
         emit("stage_start", stage="writer", label="Improving draft")
         log_and_emit("Rewriting the draft with citations…")
         agent = build_writer_agent(config, models)

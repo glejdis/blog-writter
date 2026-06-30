@@ -56,6 +56,14 @@ class AppConfig(BaseSettings):
             "flowchart) for each post. Disable with BLOG_WRITER_DIAGRAMS=false."
         ),
     )
+    style: bool = Field(
+        default=True,
+        description=(
+            "Run the Stylist agent: learn a house writing style from the example "
+            "posts in knowledge_base/style_corpus/ and have the Writer follow it. "
+            "No-op when the corpus is empty. Disable with BLOG_WRITER_STYLE=false."
+        ),
+    )
 
     # ---- Tools ---------------------------------------------------------------
     sandbox: Sandbox = "local"
@@ -78,6 +86,7 @@ class AppConfig(BaseSettings):
     drafts_dir: Path = PROJECT_ROOT / "drafts"
     samples_dir: Path = PROJECT_ROOT / "samples"
     knowledge_base_dir: Path = PROJECT_ROOT / "knowledge_base"
+    style_corpus_dir: Path = PROJECT_ROOT / "knowledge_base" / "style_corpus"
 
     def ensure_dirs(self) -> None:
         for d in (self.drafts_dir, self.samples_dir):
