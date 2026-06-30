@@ -150,6 +150,10 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
               value: chatModel
             }
             {
+              name: 'BLOG_WRITER_MODEL_STYLIST'
+              value: chatModel
+            }
+            {
               name: 'BLOG_WRITER_MODEL_DIAGRAMMER'
               value: chatModel
             }
