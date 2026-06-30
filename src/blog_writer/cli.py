@@ -52,6 +52,7 @@ from dotenv import load_dotenv
 from blog_writer.config import PROJECT_ROOT, AppConfig, load_config
 from blog_writer.observability import setup_observability
 from blog_writer.tools.fs import safe_write, slugify
+from blog_writer.tools.user_sources import UserPDF
 from blog_writer.workflows import (
     BlogState,
     build_review_report,
@@ -158,6 +159,20 @@ def improve_post(
         str | None,
         typer.Option("--topic", help="Override the search topic (default: derived from the draft)."),
     ] = None,
+    source: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--source",
+            help="URL of an extra source the agents should read and cite. Repeatable.",
+        ),
+    ] = None,
+    pdf: Annotated[
+        list[Path] | None,
+        typer.Option(
+            "--pdf",
+            help="Path to a local PDF to read and cite as a source. Repeatable.",
+        ),
+    ] = None,
     threshold: Annotated[
         int | None,
         typer.Option("--threshold", help="Override critic score threshold (0-100)."),
@@ -181,6 +196,13 @@ def improve_post(
     setup_observability(config)
 
     rewrite = not recommend_only
+    user_pdfs: list[UserPDF] = []
+    for pdf_path in pdf or []:
+        if not pdf_path.exists():
+            console.print(f"[yellow]Skipping missing PDF:[/yellow] {pdf_path}")
+            continue
+        user_pdfs.append(UserPDF(filename=pdf_path.name, data=pdf_path.read_bytes()))
+
     state = asyncio.run(
         improve_blog_post(
             draft_text,
@@ -188,6 +210,8 @@ def improve_post(
             topic=topic,
             progress=_progress,
             rewrite=rewrite,
+            user_links=list(source) if source else None,
+            user_pdfs=user_pdfs or None,
         )
     )
     _persist_improve_outputs(state, draft_path, output, rewrite=rewrite)

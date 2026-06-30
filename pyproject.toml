@@ -23,6 +23,10 @@ dependencies = [
     "pydantic-settings>=2.5",
     "python-dotenv>=1.0",
     "pyyaml>=6.0",
+    # User-supplied sources: fetch links + extract text from uploaded PDFs so the
+    # Improve flow can ground the rewrite in documents the user provides.
+    "httpx>=0.27",
+    "pypdf>=4.0",
 ]
 
 [project.optional-dependencies]

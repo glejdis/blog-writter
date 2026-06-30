@@ -55,6 +55,7 @@ from blog_writer.tools.excalidraw import (
 )
 from blog_writer.tools.learn_mcp import load_learn_scopes, search_learn, search_learn_stub
 from blog_writer.tools.style_corpus import load_style_corpus
+from blog_writer.tools.user_sources import UserPDF, ingest_user_sources
 from blog_writer.workflows.state import (
     BlogState,
     Citation,
@@ -1605,6 +1606,8 @@ async def improve_blog_post(
     progress: Callable[[str], None] | None = None,
     rewrite: bool = True,
     run_fact_check: bool = True,
+    user_links: list[str] | None = None,
+    user_pdfs: list[UserPDF] | None = None,
 ) -> BlogState:
     """Improve an existing draft: find sources, recommend changes, re-cite.
 
@@ -1613,8 +1616,10 @@ async def improve_blog_post(
 
     1. Finds Microsoft Learn + external/deep-research sources keyed off the
        draft's *own* title and section headings.
-    2. Fact-checks and critiques the draft against those sources.
-    3. (When ``rewrite``) re-runs the Writer to weave in Learn-first inline
+    2. Ingests any user-supplied sources (``user_links`` / ``user_pdfs``) and
+       prioritizes them so the rewrite is grounded in the reader's own material.
+    3. Fact-checks and critiques the draft against those sources.
+    4. (When ``rewrite``) re-runs the Writer to weave in Learn-first inline
        numbered citations (``[n](url)``) and address the recommendations,
        preserving the author's structure and voice.
 
@@ -1661,6 +1666,34 @@ async def improve_blog_post(
     log_and_emit(f"Found {len(state.external_hits)} external sources.")
     emit("citations", kind="external", items=[_citation_to_dict(c) for c in state.external_hits])
     emit("stage_end", stage="research")
+
+    # 2b. User-supplied sources (links + uploaded PDFs). These are the reader's
+    # own material, so they lead the external list and the Writer cites them
+    # alongside the auto-discovered sources.
+    if user_links or user_pdfs:
+        emit("stage_start", stage="user_sources", label="Reading your sources")
+        log_and_emit("Reading your uploaded sources…")
+        user_hits = await asyncio.to_thread(
+            ingest_user_sources, links=user_links, pdfs=user_pdfs
+        )
+        if user_hits:
+            # Prepend user sources, then renumber every external key so the
+            # E/U keys stay unique and contiguous for the citation list.
+            merged = user_hits + list(state.external_hits)
+            for i, c in enumerate(merged, start=1):
+                c.key = f"E{i}"
+            state.external_hits = merged
+            log_and_emit(
+                f"Added {len(user_hits)} source(s) from your links/PDFs."
+            )
+        else:
+            log_and_emit("No usable text found in the supplied sources.")
+        emit(
+            "citations",
+            kind="external",
+            items=[_citation_to_dict(c) for c in state.external_hits],
+        )
+        emit("stage_end", stage="user_sources")
 
     # 3. Fact-check the existing draft against the new sources.
     if run_fact_check:

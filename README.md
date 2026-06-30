@@ -241,9 +241,22 @@ blog-writer improve drafts/my-post.md --no-deep-research
 # Just the recommendations + sources — don't touch the prose.
 blog-writer improve drafts/my-post.md --recommend-only
 
+# Bring your own sources — links and/or local PDFs. The agents read them,
+# fact-check against them, and cite them in the rewrite. Both flags repeat.
+blog-writer improve drafts/my-post.md `
+  --source https://example.com/post `
+  --source https://example.com/spec.pdf `
+  --pdf .\docs\internal-design.pdf
+
 # Verify the wiring without model calls.
 blog-writer improve drafts/my-post.md --stub
 ```
+
+In the **Chat UI**, the *Improve a draft* mode has an **"Add your own sources
+(links & PDFs)"** section: paste one URL per line and/or attach PDF files. The
+uploaded material is fetched/extracted, prioritized ahead of the auto-discovered
+external sources, and woven into the rewrite as numbered `[n](url)` citations
+(uploaded PDFs are cited by filename).
 
 Outputs land next to the input draft:
 
@@ -347,7 +360,7 @@ If none are set, telemetry is silently disabled.
 ```
 src/blog_writer/
   agents/         # one file per agent role
-  tools/          # learn_mcp, bing_search, code_sandbox, fs
+  tools/          # learn_mcp, bing_search, code_sandbox, fs, user_sources
   workflows/      # the orchestration graph + shared state type
   models/         # per-agent model assignments + provider factories
   prompts/        # versioned system prompts (one .md per agent)

@@ -132,6 +132,23 @@
               </label>
             </details>
             <details>
+              <summary>Add your own sources (links &amp; PDFs)</summary>
+              <label>
+                Source links (one per line)
+                <textarea
+                  id="improve-source-links"
+                  rows="3"
+                  placeholder="https://example.com/post&#10;https://example.com/spec.pdf"
+                ></textarea>
+              </label>
+              <label>
+                Upload PDFs
+                <input id="improve-source-pdfs" type="file" accept=".pdf,application/pdf" multiple />
+                <span id="improve-source-status" class="muted reference-status hidden"></span>
+                <small class="muted">The agents read these and cite them while improving the draft.</small>
+              </label>
+            </details>
+            <details>
               <summary>Optional steering</summary>
               <label>
                 Topic override

@@ -26,6 +26,8 @@
   const improveBtn = $("improve-btn");
   const improveFile = $("improve-file");
   const improveFileStatus = $("improve-file-status");
+  const sourcePdfsInput = $("improve-source-pdfs");
+  const sourceStatus = $("improve-source-status");
   const modeToggle = $("mode-toggle");
   const modeNew = $("mode-new");
   const modeImprove = $("mode-improve");
@@ -35,6 +37,7 @@
     ["pick_angle", "Pick angle"],
     ["internal_knowledge", "Internal knowledge"],
     ["research", "Research"],
+    ["user_sources", "Your sources"],
     ["planner", "Planner"],
     ["approve_plan", "Plan approval"],
     ["poc_builder", "PoC builder"],
@@ -87,6 +90,8 @@
   let currentExcalidraw = null;
   let currentDiagramTitle = "architecture";
   let referenceDraft = "";
+  // Uploaded PDF sources for the Improve flow: [{ name, data(base64) }].
+  let sourcePdfs = [];
   // Base name for the optimized download in "Improve a draft" mode (from the
   // imported filename); falls back to the draft's H1 title.
   let improvedName = "";
@@ -619,10 +624,16 @@
       newBtn.hidden = true;
       setBusy(true);
       const recommendOnly = $("improve-recommend").checked;
+      const sourceLinks = ($("improve-source-links").value || "")
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const sourceCount = sourceLinks.length + sourcePdfs.length;
       addUser(
         path
           ? `Improve draft from: ${path}`
-          : `Improve pasted draft${recommendOnly ? " (recommend only)" : ""}`,
+          : `Improve pasted draft${recommendOnly ? " (recommend only)" : ""}` +
+              (sourceCount ? ` · ${sourceCount} source(s)` : ""),
       );
       send({
         type: "improve",
@@ -632,6 +643,8 @@
         deep_research: $("improve-deep").checked,
         recommend_only: recommendOnly,
         stub: $("improve-stub").checked,
+        source_links: sourceLinks.length ? sourceLinks : null,
+        source_pdfs: sourcePdfs.length ? sourcePdfs : null,
       });
     });
   }
@@ -694,6 +707,49 @@
           improveFileStatus.textContent = "Couldn't read that file.";
           improveFileStatus.classList.remove("hidden");
         }
+      }
+    });
+  }
+
+  // Read uploaded PDF sources as base64 so they ride along in the improve
+  // payload. The server decodes them and the agents extract + cite their text.
+  if (sourcePdfsInput) {
+    sourcePdfsInput.addEventListener("change", async () => {
+      const files = Array.from(sourcePdfsInput.files || []);
+      sourcePdfs = [];
+      if (!files.length) {
+        if (sourceStatus) sourceStatus.classList.add("hidden");
+        return;
+      }
+      const MAX_BYTES = 15_000_000; // 15 MB per file guard
+      const readAsBase64 = (file) =>
+        new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = String(reader.result || "");
+            const comma = result.indexOf(",");
+            resolve(comma >= 0 ? result.slice(comma + 1) : result);
+          };
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(file);
+        });
+      let skipped = 0;
+      for (const file of files) {
+        if (file.size > MAX_BYTES) {
+          skipped += 1;
+          continue;
+        }
+        try {
+          const data = await readAsBase64(file);
+          sourcePdfs.push({ name: file.name, data });
+        } catch (err) {
+          skipped += 1;
+        }
+      }
+      if (sourceStatus) {
+        const note = skipped ? ` (${skipped} skipped — too large or unreadable)` : "";
+        sourceStatus.textContent = `Attached ${sourcePdfs.length} PDF(s)${note} — agents will read & cite them.`;
+        sourceStatus.classList.remove("hidden");
       }
     });
   }

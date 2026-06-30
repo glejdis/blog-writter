@@ -37,6 +37,8 @@ Wire protocol — JSON messages on the WebSocket
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import json
 import logging
 import os
@@ -59,6 +61,7 @@ from blog_writer.config import PROJECT_ROOT, load_config
 # server self-sufficient).
 load_dotenv(PROJECT_ROOT / ".env")
 from blog_writer.observability import setup_observability
+from blog_writer.tools.user_sources import UserPDF
 from blog_writer.workflows.blog_pipeline import (
     build_review_report,
     improve_blog_post,
@@ -315,6 +318,8 @@ async def _run_improve_in_session(
     deep_research: bool,
     recommend_only: bool,
     stub: bool,
+    source_links: list[str] | None = None,
+    source_pdfs: list[dict[str, str]] | None = None,
 ) -> None:
     """Improve an existing draft: find sources, recommend changes, re-cite."""
     config = load_config(stub=stub, deep_research=deep_research)
@@ -324,6 +329,19 @@ async def _run_improve_in_session(
     def on_event(event: dict[str, Any]) -> None:
         session.emit(event)
 
+    # Decode any uploaded PDFs (base64 data URLs or raw base64) into UserPDFs.
+    pdfs: list[UserPDF] = []
+    for item in source_pdfs or []:
+        b64 = item.get("data") or ""
+        if "," in b64 and b64.lower().startswith("data:"):
+            b64 = b64.split(",", 1)[1]
+        try:
+            raw = base64.b64decode(b64)
+        except (ValueError, binascii.Error):
+            continue
+        if raw:
+            pdfs.append(UserPDF(filename=item.get("name") or "document.pdf", data=raw))
+
     try:
         state = await improve_blog_post(
             draft_text,
@@ -331,6 +349,8 @@ async def _run_improve_in_session(
             topic=topic,
             on_event=on_event,
             rewrite=not recommend_only,
+            user_links=source_links or None,
+            user_pdfs=pdfs or None,
         )
         session.state = state
         improved_path, review_path, sources_path = await _persist_improve(
@@ -431,6 +451,8 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                         deep_research=bool(msg.get("deep_research")),
                         recommend_only=bool(msg.get("recommend_only")),
                         stub=bool(msg.get("stub")),
+                        source_links=msg.get("source_links") or None,
+                        source_pdfs=msg.get("source_pdfs") or None,
                     )
                 )
 
